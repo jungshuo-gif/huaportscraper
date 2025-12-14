@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, time as dt_time
 # --- 網頁設定 ---
 st.set_page_config(page_title="花蓮港船舶即時查詢", layout="wide")
 
-# 定義台灣時間 (UTC+8) - 修正雲端時區問題
+# 定義台灣時間 (UTC+8)
 def get_taiwan_time():
     return datetime.utcnow() + timedelta(hours=8)
 
@@ -30,7 +30,7 @@ if 'end_time' not in st.session_state:
     st.session_state['end_time'] = get_taiwan_time().time()
 
 # --- 主畫面標題 ---
-st.title("🚢 花蓮港船舶動態查詢 (Web V7)")
+st.title("🚢 花蓮港船舶動態查詢 (XML專用版)")
 
 # --- 操作面板 ---
 with st.container():
@@ -93,7 +93,7 @@ with st.container():
     run_btn = st.button("🚀 開始查詢", type="primary", use_container_width=True)
     st.markdown("---")
 
-# --- 核心邏輯 (移植 V7 穩定版) ---
+# --- 核心邏輯 ---
 def run_scraper(start_datetime, end_datetime):
     download_dir = os.path.join(os.getcwd(), "temp_downloads")
     if not os.path.exists(download_dir):
@@ -105,11 +105,10 @@ def run_scraper(start_datetime, end_datetime):
         except: pass
 
     status_text = st.empty()
-    status_text.info("🚀 啟動雲端核心 (Chrome)...")
+    status_text.info("🚀 啟動雲端核心...")
     
     driver = None
     try:
-        # --- 雲端環境設定 (必須用 Headless Chrome) ---
         options = webdriver.ChromeOptions()
         options.add_argument("--headless=new") 
         options.add_argument("--no-sandbox")
@@ -126,17 +125,15 @@ def run_scraper(start_datetime, end_datetime):
         }
         options.add_experimental_option("prefs", prefs)
         
-        # 使用 webdriver-manager 安裝 Chrome
         service = Service(ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install())
         driver = webdriver.Chrome(service=service, options=options)
         
-        # 隱藏 Selenium 特徵
         driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
             "source": """Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"""
         })
         driver.execute_cdp_cmd('Page.setDownloadBehavior', {'behavior': 'allow', 'downloadPath': download_dir})
         
-        status_text.info(f"🔗 連線至港務系統...")
+        status_text.info(f"🔗 連線中...")
         driver.get("https://tpnet.twport.com.tw/IFAWeb/Function?_RedirUrl=/IFAWeb/Reports/HistoryPortShipList")
         
         wait = WebDriverWait(driver, 15)
@@ -150,57 +147,70 @@ def run_scraper(start_datetime, end_datetime):
             time.sleep(1)
         except: pass
 
-        # --- V7 核心關鍵：JavaScript 日期注入 (解決輸入框抓不到的問題) ---
-        # 這裡格式必須非常精確： YYYY/MM/DD HH:MM
+        # --- 注入日期 ---
         str_start = start_datetime.strftime("%Y/%m/%d %H:%M") 
         str_end = end_datetime.strftime("%Y/%m/%d %H:%M")
         
         all_inputs = driver.find_elements(By.TAG_NAME, "input")
         text_inputs = [i for i in all_inputs if i.get_attribute('type') in ['text', '']]
-        # V7 邏輯：抓取前兩個可見的輸入框
         visible_inputs = [i for i in text_inputs if i.is_displayed()]
         
         if len(visible_inputs) >= 2:
-            status_text.info(f"📝 注入查詢參數: {str_start} ~ {str_end}")
-            # 強制寫入並觸發 change 事件
+            status_text.info(f"📝 注入參數: {str_start} ~ {str_end}")
             driver.execute_script(f"arguments[0].value = '{str_start}'; arguments[0].dispatchEvent(new Event('change'));", visible_inputs[0])
             driver.execute_script(f"arguments[0].value = '{str_end}'; arguments[0].dispatchEvent(new Event('change'));", visible_inputs[1])
-        else:
-            status_text.warning("⚠️ 警告：欄位偵測異常，嘗試預設查詢")
         
         status_text.info("🔍 送出查詢...")
         query_btn = driver.find_element(By.XPATH, "//*[contains(@value,'Query') or contains(@value,'查詢')]")
         driver.execute_script("arguments[0].click();", query_btn)
         
-        # V7 邏輯：等待 4 秒
         time.sleep(4)
         
-        status_text.info("📥 執行下載...")
+        status_text.info("📥 尋找 XML 按鈕...")
         try:
             driver.switch_to.default_content()
             driver.switch_to.frame(0)
         except: pass
         
         clicked = False
-        # 嘗試點擊 XML 按鈕
-        btns = driver.find_elements(By.XPATH, "//*[contains(text(), 'XML') or contains(@value, 'XML')]")
-        for btn in btns:
-            if btn.is_displayed():
-                driver.execute_script("arguments[0].click();", btn)
-                clicked = True
-                break
         
+        # --- 關鍵修正：嚴格尋找 XML 按鈕 (V7 邏輯) ---
+        
+        # 1. 方法 A: 直接尋找畫面上是否有 'XML' 字樣的按鈕
         if not clicked:
-            # 備用：點擊 Export 圖片
-            export_btns = driver.find_elements(By.XPATH, "//a[contains(@title, 'Export')]")
-            if not export_btns: export_btns = driver.find_elements(By.XPATH, "//img[contains(@alt, 'Export')]/..")
-            if export_btns:
-                driver.execute_script("arguments[0].click();", export_btns[0])
-                time.sleep(1)
-                xml_items = driver.find_elements(By.XPATH, "//a[contains(text(), 'XML')]")
-                if xml_items:
-                    driver.execute_script("arguments[0].click();", xml_items[0])
+            try:
+                btns = driver.find_elements(By.XPATH, "//*[contains(text(), 'XML') or contains(@value, 'XML')]")
+                for btn in btns:
+                    if btn.is_displayed():
+                        driver.execute_script("arguments[0].click();", btn)
+                        clicked = True
+                        break
+            except: pass
+        
+        # 2. 方法 B: 如果找不到直接的 XML 按鈕，先點 'Export' 圖示/選單，再點裡面的 XML
+        if not clicked:
+            try:
+                # 尋找 Export (匯出) 按鈕 (通常是軟碟片圖示或下拉選單)
+                export_btns = driver.find_elements(By.XPATH, "//a[contains(@title, 'Export') or contains(@title, '匯出')]")
+                if not export_btns:
+                    export_btns = driver.find_elements(By.XPATH, "//img[contains(@alt, 'Export') or contains(@alt, '匯出')]/..")
+                
+                if export_btns:
+                    # 點擊匯出選單
+                    driver.execute_script("arguments[0].click();", export_btns[0])
+                    time.sleep(1) # 等待選單跳出
+                    
+                    # 在選單中尋找 XML 選項
+                    xml_items = driver.find_elements(By.XPATH, "//a[contains(text(), 'XML')]")
+                    if xml_items:
+                        driver.execute_script("arguments[0].click();", xml_items[0])
+                        clicked = True
+            except: pass
 
+        if not clicked:
+             status_text.warning("⚠️ 警告：找不到 XML 按鈕，可能無法下載正確格式")
+
+        # 等待檔案
         downloaded_file = None
         for _ in range(20):
             time.sleep(1)
@@ -210,11 +220,10 @@ def run_scraper(start_datetime, end_datetime):
                 break
         
         if not downloaded_file:
-            raise Exception("下載失敗，未找到 XML 檔案 (可能被阻擋或無資料)")
+            raise Exception("下載失敗，未找到 XML 檔案")
             
         status_text.info("⚙️ 解析資料 (Big5)...")
         
-        # --- V7 核心關鍵：Big5 編碼與 XML 修復 ---
         with open(downloaded_file, 'r', encoding='big5', errors='replace') as f:
             xml_content = f.read().replace('encoding="BIG5"', '').replace('encoding="big5"', '')
             
@@ -225,7 +234,6 @@ def run_scraper(start_datetime, end_datetime):
             try:
                 cname = ship.find('VESSEL_CNAME').text or ""
                 
-                # V7 邏輯：資料整理
                 gt_str = ship.find('GROSS_TOA').text or "0"
                 try: gt = int(round(float(gt_str)))
                 except: gt = 0
@@ -238,7 +246,6 @@ def run_scraper(start_datetime, end_datetime):
                     date_display = f"{pilot_time_raw[4:6]}/{pilot_time_raw[6:8]}"
                     time_display = f"{pilot_time_raw[8:10]}:{pilot_time_raw[10:12]}"
                 
-                # 代理行簡稱
                 raw_agent = ship.find('PBG_NAME').text or ""
                 agent_full = raw_agent.strip()
                 if "台灣船運" in agent_full: agent_name = "台船"
