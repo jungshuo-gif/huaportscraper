@@ -38,7 +38,7 @@ with st.sidebar:
 
     with col1:
         # 模式：近 24 小時 (精確時間)
-        if st.button("⏰ 未來 24H", use_container_width=True):
+        if st.button("▶ 未來 24H", use_container_width=True):
             st.session_state['start_date'] = now.date()
             st.session_state['start_time'] = now.time()
             
@@ -48,7 +48,7 @@ with st.sidebar:
             st.toast("已設定：未來 24 小時", icon="⏰")
 
         # 模式：前 3 日 (整天)
-        if st.button("⏮️ 前 3 日", use_container_width=True):
+        if st.button("◀ 前 3 日", use_container_width=True):
             past = now - timedelta(days=3)
             st.session_state['start_date'] = past.date()
             st.session_state['start_time'] = dt_time(0, 0) # 從 00:00 開始
@@ -58,7 +58,7 @@ with st.sidebar:
 
     with col2:
         # 模式：近 3 日 (精確時間)
-        if st.button("📅 未來 3 日", use_container_width=True):
+        if st.button("⏩ 未來 3 日", use_container_width=True):
             st.session_state['start_date'] = now.date()
             st.session_state['start_time'] = now.time()
             
@@ -139,7 +139,7 @@ def run_scraper(start_datetime, end_datetime):
         status_text.info(f"🔗 連線中...")
         driver.get("https://tpnet.twport.com.tw/IFAWeb/Function?_RedirUrl=/IFAWeb/Reports/HistoryPortShipList")
         
-        wait = WebDriverWait(driver, 20)
+        wait = WebDriverWait(driver, 3)
         
         iframes = driver.find_elements(By.TAG_NAME, "iframe")
         if iframes: driver.switch_to.frame(0)
@@ -237,10 +237,10 @@ def run_scraper(start_datetime, end_datetime):
                     "碼頭": ship.find('WHARF_CODE').text,
                     "中文船名": cname,
                     "英文船名": ship.find('VESSEL_ENAME').text,
-                    "代理行": agent_name,  # 新增欄位
                     "GT": gt,
                     "前一港": ship.find('BEFORE_PORT').text,
                     "下一港": ship.find('NEXT_PORT').text,
+                    "代理行": agent_name,  # 新增欄位
                 })
             except: continue
         
@@ -265,7 +265,7 @@ if run_btn:
             st.success(f"✅ 查詢完成！({start_dt.strftime('%m/%d %H:%M')} - {end_dt.strftime('%m/%d %H:%M')})")
             
             # 調整欄位順序，把代理行往前放
-            cols = ["日期", "時間", "狀態", "碼頭", "中文船名", "代理行", "英文船名", "GT", "前一港", "下一港"]
+            cols = ["日期", "時間", "狀態", "碼頭", "中文船名", "英文船名", "GT", "前一港", "下一港", "代理行"]
             # 確保所有欄位都存在 (防止 XML 缺漏導致報錯)
             final_cols = [c for c in cols if c in df.columns]
             
@@ -281,3 +281,4 @@ if run_btn:
             )
         elif df is not None:
             st.warning("⚠️ 此區間查無符合條件的船舶資料")
+
