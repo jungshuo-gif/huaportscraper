@@ -18,7 +18,6 @@ st.title("🚢 花蓮港船舶動態查詢系統")
 st.markdown("---")
 
 # --- 初始化 Session State ---
-# 我們需要同時儲存「日期」和「時間」
 if 'start_date' not in st.session_state:
     st.session_state['start_date'] = datetime.now().date()
 if 'start_time' not in st.session_state:
@@ -29,7 +28,7 @@ if 'end_date' not in st.session_state:
 if 'end_time' not in st.session_state:
     st.session_state['end_time'] = datetime.now().time()
 
-# --- 側邊欄：進階查詢介面 ---
+# --- 側邊欄：查詢介面 ---
 with st.sidebar:
     st.header("🔍 快速模式")
     
@@ -37,49 +36,40 @@ with st.sidebar:
     now = datetime.now()
 
     with col1:
-        # 模式：近 24 小時 (精確時間)
-        if st.button("▶ 未來 24H", use_container_width=True):
+        if st.button("⏰ 未來 24H", use_container_width=True):
             st.session_state['start_date'] = now.date()
             st.session_state['start_time'] = now.time()
-            
             future = now + timedelta(hours=24)
             st.session_state['end_date'] = future.date()
             st.session_state['end_time'] = future.time()
             st.toast("已設定：未來 24 小時", icon="⏰")
 
-        # 模式：前 3 日 (整天)
-        if st.button("◀ 前 3 日", use_container_width=True):
+        if st.button("⏮️ 前 3 日", use_container_width=True):
             past = now - timedelta(days=3)
             st.session_state['start_date'] = past.date()
-            st.session_state['start_time'] = dt_time(0, 0) # 從 00:00 開始
-            
+            st.session_state['start_time'] = dt_time(0, 0)
             st.session_state['end_date'] = now.date()
             st.session_state['end_time'] = now.time()
 
     with col2:
-        # 模式：近 3 日 (精確時間)
-        if st.button("⏩ 未來 3 日", use_container_width=True):
+        if st.button("📅 未來 3 日", use_container_width=True):
             st.session_state['start_date'] = now.date()
             st.session_state['start_time'] = now.time()
-            
             future = now + timedelta(hours=72)
             st.session_state['end_date'] = future.date()
             st.session_state['end_time'] = future.time()
             st.toast("已設定：未來 72 小時", icon="📅")
 
-        # 模式：前 7 日 (整天)
         if st.button("⏮️ 前 7 日", use_container_width=True):
             past = now - timedelta(days=7)
             st.session_state['start_date'] = past.date()
             st.session_state['start_time'] = dt_time(0, 0)
-            
             st.session_state['end_date'] = now.date()
             st.session_state['end_time'] = now.time()
 
     st.markdown("---")
     st.header("📆 詳細設定")
     
-    # 日期與時間輸入框 (分開顯示但組合使用)
     c1, c2 = st.columns(2)
     with c1:
         s_date = st.date_input("開始日期", key='start_date')
@@ -88,7 +78,6 @@ with st.sidebar:
         e_date = st.date_input("結束日期", key='end_date')
         e_time = st.time_input("結束時間", key='end_time')
     
-    # 將日期與時間組合成 datetime 物件
     start_dt = datetime.combine(s_date, s_time)
     end_dt = datetime.combine(e_date, e_time)
 
@@ -139,7 +128,7 @@ def run_scraper(start_datetime, end_datetime):
         status_text.info(f"🔗 連線中...")
         driver.get("https://tpnet.twport.com.tw/IFAWeb/Function?_RedirUrl=/IFAWeb/Reports/HistoryPortShipList")
         
-        wait = WebDriverWait(driver, 3)
+        wait = WebDriverWait(driver, 20)
         
         iframes = driver.find_elements(By.TAG_NAME, "iframe")
         if iframes: driver.switch_to.frame(0)
@@ -151,7 +140,6 @@ def run_scraper(start_datetime, end_datetime):
             time.sleep(1)
         except: pass
 
-        # --- 關鍵修正：傳入精確的日期時間 ---
         str_start = start_datetime.strftime("%Y/%m/%d %H:%M")
         str_end = end_datetime.strftime("%Y/%m/%d %H:%M")
         
@@ -160,7 +148,6 @@ def run_scraper(start_datetime, end_datetime):
         target_inputs = [inp for inp in text_inputs if inp.get_attribute("value") and "20" in inp.get_attribute("value")]
         
         if len(target_inputs) >= 2:
-            # 使用 JavaScript 直接注入精確的時間字串
             driver.execute_script(f"arguments[0].value = '{str_start}'; arguments[0].dispatchEvent(new Event('change'));", target_inputs[0])
             driver.execute_script(f"arguments[0].value = '{str_end}'; arguments[0].dispatchEvent(new Event('change'));", target_inputs[1])
         
@@ -204,13 +191,14 @@ def run_scraper(start_datetime, end_datetime):
         if not downloaded_file:
             raise Exception("未偵測到下載檔案")
             
-        status_text.info("⚙️ 解析並提取代理資訊...")
+        status_text.info("⚙️ 解析資料...")
         with open(downloaded_file, 'r', encoding='big5', errors='replace') as f:
             xml_content = f.read().replace('encoding="BIG5"', '').replace('encoding="big5"', '')
             
         root = ET.fromstring(xml_content)
         parsed_data = []
         
+        # --- 這裡開始是你要修改的邏輯 ---
         for ship in root.findall('SHIP'):
             try:
                 cname = ship.find('VESSEL_CNAME').text or ""
@@ -225,14 +213,20 @@ def run_scraper(start_datetime, end_datetime):
                 if len(pilot_time_raw) >= 12:
                     date_display = f"{pilot_time_raw[4:6]}/{pilot_time_raw[6:8]}"
                     time_display = f"{pilot_time_raw[8:10]}:{pilot_time_raw[10:12]}"
+                
+                # --- 代理行邏輯修正 ---
+                raw_agent = ship.find('PBG_NAME').text or ""
+                agent_full = raw_agent.strip()
+                
+                if "台灣船運" in agent_full:
+                    agent_name = "台船"
+                elif "海軍" in agent_full:
+                    agent_name = "海軍"
+                else:
+                    agent_name = agent_full[:2] # 預設取前兩字
                     
-                agent_short = agent[:2] if agent else ""
-                    if "台灣船運" in agent: agent_short = "台船"
-                    elif "海軍" in agent: agent_short = "海軍"
-                        
-                # 提取代理行名稱
-                try: agent_name = ship.find('PBG_NAME').text or ""
-                except: agent_name = ""
+                # 2. 抓取 LOA
+                loa = ship.find('LOA').text or ""
 
                 parsed_data.append({
                     "日期": date_display,
@@ -240,11 +234,12 @@ def run_scraper(start_datetime, end_datetime):
                     "狀態": ship.find('SP_STS').text,
                     "碼頭": ship.find('WHARF_CODE').text,
                     "中文船名": cname,
+                    "長度(m)": loa,       # 新增 LOA 欄位
                     "英文船名": ship.find('VESSEL_ENAME').text,
-                    "GT": gt,
+                    "代理行": agent_name,  # 已修正為只取前兩字
+                    "總噸位": gt,
                     "前一港": ship.find('BEFORE_PORT').text,
                     "下一港": ship.find('NEXT_PORT').text,
-                    "代理行": agent_name,  # 新增欄位
                 })
             except: continue
         
@@ -268,9 +263,8 @@ if run_btn:
             
             st.success(f"✅ 查詢完成！({start_dt.strftime('%m/%d %H:%M')} - {end_dt.strftime('%m/%d %H:%M')})")
             
-            # 調整欄位順序，把代理行往前放
-            cols = ["日期", "時間", "狀態", "碼頭", "中文船名", "英文船名", "GT", "前一港", "下一港", "代理行"]
-            # 確保所有欄位都存在 (防止 XML 缺漏導致報錯)
+            # 排列欄位順序：把重要資訊放前面
+            cols = ["日期", "時間", "狀態", "碼頭", "中文船名", "長度(m)", "英文船名", "總噸位", "前一港", "下一港", "代理行"]
             final_cols = [c for c in cols if c in df.columns]
             
             st.dataframe(df[final_cols], use_container_width=True)
@@ -285,5 +279,3 @@ if run_btn:
             )
         elif df is not None:
             st.warning("⚠️ 此區間查無符合條件的船舶資料")
-
-
