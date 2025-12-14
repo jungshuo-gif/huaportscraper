@@ -28,13 +28,16 @@ if 'end_date' not in st.session_state:
     st.session_state['end_date'] = get_taiwan_time().date()
 if 'end_time' not in st.session_state:
     st.session_state['end_time'] = get_taiwan_time().time()
+    
+if 'auto_run' not in st.session_state:
+    st.session_state['auto_run'] = False
 
 # --- 主畫面標題 ---
-st.title("🚢 花蓮港船舶動態查詢 (XML專用版)")
+st.title("🚢 花蓮港船舶動態查詢 (Web V9)")
 
 # --- 操作面板 ---
 with st.container():
-    st.write("⏱️ **快速時間選擇**")
+    st.write("⏱️ **快速查詢 (點擊即執行)**")
     b1, b2, b3, b4 = st.columns(4)
     now = get_taiwan_time()
 
@@ -45,8 +48,9 @@ with st.container():
             future = now + timedelta(hours=24)
             st.session_state['end_date'] = future.date()
             st.session_state['end_time'] = future.time()
-            st.toast("已設定：未來 24 小時")
-            
+            st.session_state['auto_run'] = True
+            st.rerun() # 強制刷新頁面，立即執行
+
     with b2:
         if st.button("📅 未來3日", use_container_width=True):
             st.session_state['start_date'] = now.date()
@@ -54,16 +58,19 @@ with st.container():
             future = now + timedelta(hours=72)
             st.session_state['end_date'] = future.date()
             st.session_state['end_time'] = future.time()
-            st.toast("已設定：未來 72 小時")
+            st.session_state['auto_run'] = True
+            st.rerun()
 
     with b3:
         if st.button("⏮️ 前3日", use_container_width=True):
             past = now - timedelta(days=3)
             st.session_state['start_date'] = past.date()
+            # 修正：開始時間設為 00:00，結束時間設為「現在」，避開 23:59 的 Bug
             st.session_state['start_time'] = dt_time(0, 0)
             st.session_state['end_date'] = now.date()
-            st.session_state['end_time'] = dt_time(23, 59)
-            st.toast("已設定：過去 3 日 (含今日)")
+            st.session_state['end_time'] = now.time() # 改用現在時間
+            st.session_state['auto_run'] = True
+            st.rerun()
 
     with b4:
         if st.button("🗓️ 本月整月", use_container_width=True):
@@ -71,8 +78,9 @@ with st.container():
             st.session_state['start_date'] = first_day.date()
             st.session_state['start_time'] = first_day.time()
             st.session_state['end_date'] = now.date()
-            st.session_state['end_time'] = dt_time(23, 59)
-            st.toast("已設定：本月整月")
+            st.session_state['end_time'] = now.time() # 改用現在時間
+            st.session_state['auto_run'] = True
+            st.rerun()
 
     with st.expander("📆 詳細日期設定 (點擊展開)", expanded=True):
         c1, c2 = st.columns(2)
@@ -90,7 +98,7 @@ with st.container():
     start_dt = datetime.combine(s_date, s_time)
     end_dt = datetime.combine(e_date, e_time)
 
-    run_btn = st.button("🚀 開始查詢", type="primary", use_container_width=True)
+    manual_run = st.button("🚀 開始查詢", type="primary", use_container_width=True)
     st.markdown("---")
 
 # --- 核心爬蟲邏輯 ---
@@ -111,7 +119,7 @@ def run_scraper(start_time, end_time):
     try:
         options = webdriver.ChromeOptions()
         # --- 雲端環境必要設定 (Headless) ---
-        options.add_argument("--headless") 
+        options.add_argument("--headless=new") 
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-gpu")
@@ -126,12 +134,9 @@ def run_scraper(start_time, end_time):
         }
         options.add_experimental_option("prefs", prefs)
         
-        # --- 關鍵：在 Linux 環境使用 Chromium ---
-        # 這裡指定使用 ChromeType.CHROMIUM，這是 Streamlit Cloud 支援的版本
         service = Service(ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install())
         driver = webdriver.Chrome(service=service, options=options)
         
-        # 防偵測設定
         driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
             "source": """Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"""
         })
@@ -142,44 +147,43 @@ def run_scraper(start_time, end_time):
         
         wait = WebDriverWait(driver, 20)
         
-        # --- 切換 iFrame ---
         iframes = driver.find_elements(By.TAG_NAME, "iframe")
         if iframes: driver.switch_to.frame(0)
         time.sleep(1)
         
-        # --- 點擊花蓮港 ---
         try:
             hualien_tab = wait.until(EC.element_to_be_clickable((By.XPATH, "//*[contains(text(),'花蓮港')]")))
             driver.execute_script("arguments[0].click();", hualien_tab)
             time.sleep(1)
         except: pass
 
-        # --- 輸入日期 ---
         str_start = start_time.strftime("%Y/%m/%d %H:%M") 
         str_end = end_time.strftime("%Y/%m/%d %H:%M")
         
         all_inputs = driver.find_elements(By.TAG_NAME, "input")
         text_inputs = [i for i in all_inputs if i.get_attribute('type') in ['text', '']]
-        target_inputs = [inp for inp in text_inputs if inp.get_attribute("value") and "20" in inp.get_attribute("value")]
+        visible_inputs = [i for i in text_inputs if i.is_displayed()]
         
-        if len(target_inputs) >= 2:
-            driver.execute_script(f"arguments[0].value = '{str_start}'; arguments[0].dispatchEvent(new Event('change'));", target_inputs[0])
-            driver.execute_script(f"arguments[0].value = '{str_end}'; arguments[0].dispatchEvent(new Event('change'));", target_inputs[1])
+        if len(visible_inputs) >= 2:
+            driver.execute_script(f"arguments[0].value = '{str_start}'; arguments[0].dispatchEvent(new Event('change'));", visible_inputs[0])
+            driver.execute_script(f"arguments[0].value = '{str_end}'; arguments[0].dispatchEvent(new Event('change'));", visible_inputs[1])
+            status_text.info(f"📝 查詢區間：{str_start} ~ {str_end}")
+        else:
+            status_text.warning("⚠️ 警告：無法自動填入日期")
         
-        # --- 點擊查詢 ---
-        status_text.info("🔍 查詢資料中...")
+        status_text.info("🔍 送出查詢...")
         query_btn = driver.find_element(By.XPATH, "//*[contains(@value,'Query') or contains(@value,'查詢')]")
         driver.execute_script("arguments[0].click();", query_btn)
         time.sleep(5) 
         
-        # --- 下載 XML ---
-        status_text.info("📥 嘗試下載報表...")
+        status_text.info("📥 尋找並點擊 XML 按鈕...")
         try:
             driver.switch_to.default_content()
             driver.switch_to.frame(0)
         except: pass
         
         clicked = False
+        
         btns = driver.find_elements(By.XPATH, "//*[contains(text(), 'XML') or contains(@value, 'XML')]")
         for btn in btns:
             if btn.is_displayed():
@@ -188,18 +192,23 @@ def run_scraper(start_time, end_time):
                 break
         
         if not clicked:
-            export_btns = driver.find_elements(By.XPATH, "//a[contains(@title, 'Export')]")
-            if not export_btns: export_btns = driver.find_elements(By.XPATH, "//img[contains(@alt, 'Export')]/..")
+            export_btns = driver.find_elements(By.XPATH, "//a[contains(@title, 'Export') or contains(@title, '匯出')]")
+            if not export_btns: 
+                export_btns = driver.find_elements(By.XPATH, "//img[contains(@alt, 'Export') or contains(@alt, '匯出')]/..")
+            
             if export_btns:
                 driver.execute_script("arguments[0].click();", export_btns[0])
                 time.sleep(1)
                 xml_items = driver.find_elements(By.XPATH, "//a[contains(text(), 'XML')]")
                 if xml_items:
                     driver.execute_script("arguments[0].click();", xml_items[0])
+                    clicked = True
 
-        # --- 等待檔案 ---
+        if not clicked:
+            raise Exception("找不到 XML 下載按鈕")
+
         downloaded_file = None
-        for _ in range(15):
+        for _ in range(20):
             time.sleep(1)
             files = [f for f in os.listdir(download_dir) if f.endswith('.xml')]
             if files:
@@ -207,7 +216,7 @@ def run_scraper(start_time, end_time):
                 break
         
         if not downloaded_file:
-            raise Exception("未偵測到下載檔案")
+            raise Exception("下載逾時，未找到 XML 檔案")
             
         status_text.info("⚙️ 解析資料 (Big5)...")
         
@@ -267,8 +276,10 @@ def run_scraper(start_time, end_time):
     finally:
         if driver: driver.quit()
 
-# --- 顯示結果 ---
-if run_btn:
+# --- 觸發執行 ---
+if manual_run or st.session_state.get('auto_run', False):
+    st.session_state['auto_run'] = False
+    
     if start_dt > end_dt:
         st.error("❌ 開始時間不能晚於結束時間")
     else:
@@ -298,4 +309,3 @@ if run_btn:
             )
         elif df is not None:
             st.warning("⚠️ 此區間查無符合條件的船舶資料")
-
