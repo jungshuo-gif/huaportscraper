@@ -46,7 +46,7 @@ with st.container():
             st.session_state['end_date'] = future.date()
             st.session_state['end_time'] = future.time()
             st.toast("已設定：未來 24 小時")
-
+            
     with b2:
         if st.button("📅 未來3日", use_container_width=True):
             st.session_state['start_date'] = now.date()
@@ -155,8 +155,8 @@ def run_scraper(start_time, end_time):
         except: pass
 
         # --- 輸入日期 ---
-        str_start = start_time.strftime("%Y/%m/%d") + " 00:00"
-        str_end = end_time.strftime("%Y/%m/%d") + " 23:59"
+        str_start = start_time.strftime("%Y/%m/%d %H:%M") 
+        str_end = end_time.strftime("%Y/%m/%d %H:%M")
         
         all_inputs = driver.find_elements(By.TAG_NAME, "input")
         text_inputs = [i for i in all_inputs if i.get_attribute('type') in ['text', '']]
