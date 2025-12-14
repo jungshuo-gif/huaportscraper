@@ -154,67 +154,94 @@ def run_scraper(start_time, end_time):
             time.sleep(1)
         except: pass
 
-        # --- 輸入日期 ---
-        str_start = start_time.strftime("%Y/%m/%d %H:%M") 
-        str_end = end_time.strftime("%Y/%m/%d %H:%M")
-        
-        all_inputs = driver.find_elements(By.TAG_NAME, "input")
-        text_inputs = [i for i in all_inputs if i.get_attribute('type') in ['text', '']]
-        target_inputs = [inp for inp in text_inputs if inp.get_attribute("value") and "20" in inp.get_attribute("value")]
-        
-        if len(visible_inputs) >= 2:
-            driver.execute_script(f"arguments[0].value = '{str_start}'; arguments[0].dispatchEvent(new Event('change'));", visible_inputs[0])
-            driver.execute_script(f"arguments[0].value = '{str_end}'; arguments[0].dispatchEvent(new Event('change'));", visible_inputs[1])
-            status_text.info(f"📝 查詢區間：{str_start} ~ {str_end}")
-        else:
-            status_text.warning("⚠️ 警告：無法自動填入日期")
-        
-        # --- 🔴 新增：還原 V7 的過濾邏輯 (清除干擾) ---
-        try:
-            # 1. 設定排序 (Ordering by) - 選擇第二個選項 (通常是依時間排序)
-            sort_select = driver.find_element(By.XPATH, "//*[contains(text(),'Ordering by')]/following::select[1]")
-            Select(sort_select).select_by_index(1)
-        except: pass
-        
-        try:
-            # 2. 清除所有預設勾選的 Checkbox (避免網站預設只顯示特定船種或狀態)
-            # 這是 V7 版本有的邏輯，Web 版原本漏掉了
-            checked_boxes = driver.find_elements(By.CSS_SELECTOR, "input[type='checkbox']:checked")
-            for cb in checked_boxes: 
-                driver.execute_script("arguments[0].click();", cb)
-        except: pass
-        
-        # --- 點擊查詢 ---
-        status_text.info("🔍 查詢資料中...")
-        query_btn = driver.find_element(By.XPATH, "//*[contains(@value,'Query') or contains(@value,'查詢')]")
-        driver.execute_script("arguments[0].click();", query_btn)
-        time.sleep(5) 
-        
-        # --- 下載 XML ---
-        status_text.info("📥 嘗試下載報表...")
-        try:
-            driver.switch_to.default_content()
-            driver.switch_to.frame(0)
-        except: pass
-        
-        clicked = False
-        btns = driver.find_elements(By.XPATH, "//*[contains(text(), 'XML') or contains(@value, 'XML')]")
-        for btn in btns:
-            if btn.is_displayed():
-                driver.execute_script("arguments[0].click();", btn)
-                clicked = True
-                break
-        
-        if not clicked:
-            export_btns = driver.find_elements(By.XPATH, "//a[contains(@title, 'Export')]")
-            if not export_btns: export_btns = driver.find_elements(By.XPATH, "//img[contains(@alt, 'Export')]/..")
-            if export_btns:
-                driver.execute_script("arguments[0].click();", export_btns[0])
-                time.sleep(1)
-                xml_items = driver.find_elements(By.XPATH, "//a[contains(text(), 'XML')]")
-                if xml_items:
-                    driver.execute_script("arguments[0].click();", xml_items[0])
-
+        # 輸入日期
+            str_start = start_time.strftime("%Y/%m/%d")
+            str_start_time = start_time.strftime("%H:%M")
+            str_end = end_time.strftime("%Y/%m/%d")
+            str_end_time = end_time.strftime("%H:%M")
+            
+            all_inputs = driver.find_elements(By.TAG_NAME, "input")
+            text_inputs = [i for i in all_inputs if i.get_attribute('type') in ['text', '']]
+            target_date_inputs = [inp for inp in text_inputs if inp.get_attribute("value") and inp.get_attribute("value").startswith("20")]
+            
+            if len(target_date_inputs) < 2 and len(text_inputs) >= 2:
+                target_date_inputs = [text_inputs[0], text_inputs[1]]
+                
+            if len(target_date_inputs) >= 2:
+                val_start = f"{str_start} {str_start_time}"
+                val_end = f"{str_end} {str_end_time}"
+                driver.execute_script(f"arguments[0].value = '{val_start}'; arguments[0].dispatchEvent(new Event('change'));", target_date_inputs[0])
+                driver.execute_script(f"arguments[0].value = '{val_end}'; arguments[0].dispatchEvent(new Event('change'));", target_date_inputs[1])
+            
+            # 排序
+            try:
+                sort_select = driver.find_element(By.XPATH, "//*[contains(text(),'Ordering by')]/following::select[1]")
+                Select(sort_select).select_by_index(1)
+            except: pass
+            
+            # Checkbox
+            try:
+                checked_boxes = driver.find_elements(By.CSS_SELECTOR, "input[type='checkbox']:checked")
+                for cb in checked_boxes: driver.execute_script("arguments[0].click();", cb)
+            except: pass
+            
+            # 查詢
+            query_btn = driver.find_element(By.XPATH, "//*[contains(@value,'Query') or contains(@value,'查詢')]")
+            driver.execute_script("arguments[0].click();", query_btn)
+            self.log("🔍 查詢中...")
+            time.sleep(4)
+            
+            # 下載 XML
+            self.log("📥 嘗試下載 XML...")
+            try:
+                try:
+                    driver.switch_to.default_content()
+                    driver.switch_to.frame(0)
+                except: pass
+                
+                clicked = False
+                files_before = set(os.listdir(download_dir))
+                
+                # 方法 A
+                if not clicked:
+                    try:
+                        btns = driver.find_elements(By.XPATH, "//*[contains(text(), 'XML') or contains(@value, 'XML')]")
+                        for btn in btns:
+                            if btn.is_displayed():
+                                driver.execute_script("arguments[0].click();", btn)
+                                clicked = True
+                                break
+                    except: pass
+                
+                # 方法 B
+                if not clicked:
+                    try:
+                        export_btns = driver.find_elements(By.XPATH, "//a[contains(@title, 'Export') or contains(@title, '匯出')]")
+                        if not export_btns:
+                             export_btns = driver.find_elements(By.XPATH, "//img[contains(@alt, 'Export') or contains(@alt, '匯出')]/..")
+                        if export_btns:
+                            driver.execute_script("arguments[0].click();", export_btns[0])
+                            time.sleep(1)
+                            xml_items = driver.find_elements(By.XPATH, "//a[contains(text(), 'XML')]")
+                            if xml_items:
+                                driver.execute_script("arguments[0].click();", xml_items[0])
+                                clicked = True
+                    except: pass
+                
+                # 等待下載
+                waited = 0
+                downloaded_file = None
+                while waited < 20:
+                    time.sleep(1)
+                    waited += 1
+                    files_after = set(os.listdir(download_dir))
+                    new_files = files_after - files_before
+                    xml_files = [f for f in new_files if f.lower().endswith('.xml')]
+                    if xml_files:
+                        downloaded_file = xml_files[0]
+                        self.log(f"✅ 下載成功: {downloaded_file}")
+                        break
+                
         # --- 等待檔案 ---
         downloaded_file = None
         for _ in range(15):
@@ -316,6 +343,7 @@ if run_btn:
             )
         elif df is not None:
             st.warning("⚠️ 此區間查無符合條件的船舶資料")
+
 
 
 
