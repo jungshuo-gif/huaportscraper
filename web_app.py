@@ -17,6 +17,11 @@ st.set_page_config(page_title="花蓮港船舶即時查詢", layout="wide")
 st.title("🚢 花蓮港船舶動態查詢系統")
 st.markdown("---")
 
+# --- 關鍵修正：定義台灣時間 (UTC+8) ---
+def get_taiwan_time():
+    # 伺服器通常是 UTC，所以我們抓 UTC 時間然後 +8 小時
+    return datetime.utcnow() + timedelta(hours=8)
+    
 # --- 初始化 Session State ---
 if 'start_date' not in st.session_state:
     st.session_state['start_date'] = datetime.now().date()
@@ -279,3 +284,4 @@ if run_btn:
             )
         elif df is not None:
             st.warning("⚠️ 此區間查無符合條件的船舶資料")
+
