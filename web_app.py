@@ -93,24 +93,25 @@ with st.container():
     run_btn = st.button("🚀 開始查詢", type="primary", use_container_width=True)
     st.markdown("---")
 
-# --- 核心邏輯 ---
-def run_scraper(start_datetime, end_datetime):
+# --- 核心爬蟲邏輯 ---
+def run_scraper(start_time, end_time):
     download_dir = os.path.join(os.getcwd(), "temp_downloads")
     if not os.path.exists(download_dir):
         os.makedirs(download_dir)
     
-    # 清空下載區
+    # 清理舊檔
     for f in os.listdir(download_dir):
         try: os.remove(os.path.join(download_dir, f))
         except: pass
 
     status_text = st.empty()
-    status_text.info("🚀 啟動雲端核心...")
+    status_text.info("🚀 正在啟動雲端瀏覽器核心...")
     
     driver = None
     try:
         options = webdriver.ChromeOptions()
-        options.add_argument("--headless=new") 
+        # --- 雲端環境必要設定 (Headless) ---
+        options.add_argument("--headless") 
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-gpu")
@@ -125,9 +126,12 @@ def run_scraper(start_datetime, end_datetime):
         }
         options.add_experimental_option("prefs", prefs)
         
+        # --- 關鍵：在 Linux 環境使用 Chromium ---
+        # 這裡指定使用 ChromeType.CHROMIUM，這是 Streamlit Cloud 支援的版本
         service = Service(ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install())
         driver = webdriver.Chrome(service=service, options=options)
         
+        # 防偵測設定
         driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
             "source": """Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"""
         })
@@ -136,83 +140,66 @@ def run_scraper(start_datetime, end_datetime):
         status_text.info(f"🔗 連線中...")
         driver.get("https://tpnet.twport.com.tw/IFAWeb/Function?_RedirUrl=/IFAWeb/Reports/HistoryPortShipList")
         
-        wait = WebDriverWait(driver, 15)
+        wait = WebDriverWait(driver, 20)
         
+        # --- 切換 iFrame ---
         iframes = driver.find_elements(By.TAG_NAME, "iframe")
         if iframes: driver.switch_to.frame(0)
+        time.sleep(1)
         
+        # --- 點擊花蓮港 ---
         try:
             hualien_tab = wait.until(EC.element_to_be_clickable((By.XPATH, "//*[contains(text(),'花蓮港')]")))
             driver.execute_script("arguments[0].click();", hualien_tab)
             time.sleep(1)
         except: pass
 
-        # --- 注入日期 ---
-        str_start = start_datetime.strftime("%Y/%m/%d %H:%M") 
-        str_end = end_datetime.strftime("%Y/%m/%d %H:%M")
+        # --- 輸入日期 ---
+        str_start = start_time.strftime("%Y/%m/%d") + " 00:00"
+        str_end = end_time.strftime("%Y/%m/%d") + " 23:59"
         
         all_inputs = driver.find_elements(By.TAG_NAME, "input")
         text_inputs = [i for i in all_inputs if i.get_attribute('type') in ['text', '']]
-        visible_inputs = [i for i in text_inputs if i.is_displayed()]
+        target_inputs = [inp for inp in text_inputs if inp.get_attribute("value") and "20" in inp.get_attribute("value")]
         
-        if len(visible_inputs) >= 2:
-            status_text.info(f"📝 注入參數: {str_start} ~ {str_end}")
-            driver.execute_script(f"arguments[0].value = '{str_start}'; arguments[0].dispatchEvent(new Event('change'));", visible_inputs[0])
-            driver.execute_script(f"arguments[0].value = '{str_end}'; arguments[0].dispatchEvent(new Event('change'));", visible_inputs[1])
+        if len(target_inputs) >= 2:
+            driver.execute_script(f"arguments[0].value = '{str_start}'; arguments[0].dispatchEvent(new Event('change'));", target_inputs[0])
+            driver.execute_script(f"arguments[0].value = '{str_end}'; arguments[0].dispatchEvent(new Event('change'));", target_inputs[1])
         
-        status_text.info("🔍 送出查詢...")
+        # --- 點擊查詢 ---
+        status_text.info("🔍 查詢資料中...")
         query_btn = driver.find_element(By.XPATH, "//*[contains(@value,'Query') or contains(@value,'查詢')]")
         driver.execute_script("arguments[0].click();", query_btn)
+        time.sleep(5) 
         
-        time.sleep(4)
-        
-        status_text.info("📥 尋找 XML 按鈕...")
+        # --- 下載 XML ---
+        status_text.info("📥 嘗試下載報表...")
         try:
             driver.switch_to.default_content()
             driver.switch_to.frame(0)
         except: pass
         
         clicked = False
+        btns = driver.find_elements(By.XPATH, "//*[contains(text(), 'XML') or contains(@value, 'XML')]")
+        for btn in btns:
+            if btn.is_displayed():
+                driver.execute_script("arguments[0].click();", btn)
+                clicked = True
+                break
         
-        # --- 關鍵修正：嚴格尋找 XML 按鈕 (V7 邏輯) ---
-        
-        # 1. 方法 A: 直接尋找畫面上是否有 'XML' 字樣的按鈕
         if not clicked:
-            try:
-                btns = driver.find_elements(By.XPATH, "//*[contains(text(), 'XML') or contains(@value, 'XML')]")
-                for btn in btns:
-                    if btn.is_displayed():
-                        driver.execute_script("arguments[0].click();", btn)
-                        clicked = True
-                        break
-            except: pass
-        
-        # 2. 方法 B: 如果找不到直接的 XML 按鈕，先點 'Export' 圖示/選單，再點裡面的 XML
-        if not clicked:
-            try:
-                # 尋找 Export (匯出) 按鈕 (通常是軟碟片圖示或下拉選單)
-                export_btns = driver.find_elements(By.XPATH, "//a[contains(@title, 'Export') or contains(@title, '匯出')]")
-                if not export_btns:
-                    export_btns = driver.find_elements(By.XPATH, "//img[contains(@alt, 'Export') or contains(@alt, '匯出')]/..")
-                
-                if export_btns:
-                    # 點擊匯出選單
-                    driver.execute_script("arguments[0].click();", export_btns[0])
-                    time.sleep(1) # 等待選單跳出
-                    
-                    # 在選單中尋找 XML 選項
-                    xml_items = driver.find_elements(By.XPATH, "//a[contains(text(), 'XML')]")
-                    if xml_items:
-                        driver.execute_script("arguments[0].click();", xml_items[0])
-                        clicked = True
-            except: pass
+            export_btns = driver.find_elements(By.XPATH, "//a[contains(@title, 'Export')]")
+            if not export_btns: export_btns = driver.find_elements(By.XPATH, "//img[contains(@alt, 'Export')]/..")
+            if export_btns:
+                driver.execute_script("arguments[0].click();", export_btns[0])
+                time.sleep(1)
+                xml_items = driver.find_elements(By.XPATH, "//a[contains(text(), 'XML')]")
+                if xml_items:
+                    driver.execute_script("arguments[0].click();", xml_items[0])
 
-        if not clicked:
-             status_text.warning("⚠️ 警告：找不到 XML 按鈕，可能無法下載正確格式")
-
-        # 等待檔案
+        # --- 等待檔案 ---
         downloaded_file = None
-        for _ in range(20):
+        for _ in range(15):
             time.sleep(1)
             files = [f for f in os.listdir(download_dir) if f.endswith('.xml')]
             if files:
@@ -220,7 +207,7 @@ def run_scraper(start_datetime, end_datetime):
                 break
         
         if not downloaded_file:
-            raise Exception("下載失敗，未找到 XML 檔案")
+            raise Exception("未偵測到下載檔案")
             
         status_text.info("⚙️ 解析資料 (Big5)...")
         
@@ -311,3 +298,4 @@ if run_btn:
             )
         elif df is not None:
             st.warning("⚠️ 此區間查無符合條件的船舶資料")
+
