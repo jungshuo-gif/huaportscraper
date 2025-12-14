@@ -38,7 +38,7 @@ with st.sidebar:
     st.header("🔍 快速模式")
     
     col1, col2 = st.columns(2)
-    now = datetime.now()
+    now = get_taiwan_time()
 
     with col1:
         if st.button("⏰ 未來 24H", use_container_width=True):
@@ -284,4 +284,5 @@ if run_btn:
             )
         elif df is not None:
             st.warning("⚠️ 此區間查無符合條件的船舶資料")
+
 
