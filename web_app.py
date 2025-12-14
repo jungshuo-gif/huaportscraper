@@ -225,7 +225,11 @@ def run_scraper(start_datetime, end_datetime):
                 if len(pilot_time_raw) >= 12:
                     date_display = f"{pilot_time_raw[4:6]}/{pilot_time_raw[6:8]}"
                     time_display = f"{pilot_time_raw[8:10]}:{pilot_time_raw[10:12]}"
-                
+                    
+                agent_short = agent[:2] if agent else ""
+                    if "台灣船運" in agent: agent_short = "台船"
+                    elif "海軍" in agent: agent_short = "海軍"
+                        
                 # 提取代理行名稱
                 try: agent_name = ship.find('PBG_NAME').text or ""
                 except: agent_name = ""
@@ -281,4 +285,5 @@ if run_btn:
             )
         elif df is not None:
             st.warning("⚠️ 此區間查無符合條件的船舶資料")
+
 
