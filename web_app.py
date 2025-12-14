@@ -162,9 +162,27 @@ def run_scraper(start_time, end_time):
         text_inputs = [i for i in all_inputs if i.get_attribute('type') in ['text', '']]
         target_inputs = [inp for inp in text_inputs if inp.get_attribute("value") and "20" in inp.get_attribute("value")]
         
-        if len(target_inputs) >= 2:
-            driver.execute_script(f"arguments[0].value = '{str_start}'; arguments[0].dispatchEvent(new Event('change'));", target_inputs[0])
-            driver.execute_script(f"arguments[0].value = '{str_end}'; arguments[0].dispatchEvent(new Event('change'));", target_inputs[1])
+        if len(visible_inputs) >= 2:
+            driver.execute_script(f"arguments[0].value = '{str_start}'; arguments[0].dispatchEvent(new Event('change'));", visible_inputs[0])
+            driver.execute_script(f"arguments[0].value = '{str_end}'; arguments[0].dispatchEvent(new Event('change'));", visible_inputs[1])
+            status_text.info(f"📝 查詢區間：{str_start} ~ {str_end}")
+        else:
+            status_text.warning("⚠️ 警告：無法自動填入日期")
+        
+        # --- 🔴 新增：還原 V7 的過濾邏輯 (清除干擾) ---
+        try:
+            # 1. 設定排序 (Ordering by) - 選擇第二個選項 (通常是依時間排序)
+            sort_select = driver.find_element(By.XPATH, "//*[contains(text(),'Ordering by')]/following::select[1]")
+            Select(sort_select).select_by_index(1)
+        except: pass
+        
+        try:
+            # 2. 清除所有預設勾選的 Checkbox (避免網站預設只顯示特定船種或狀態)
+            # 這是 V7 版本有的邏輯，Web 版原本漏掉了
+            checked_boxes = driver.find_elements(By.CSS_SELECTOR, "input[type='checkbox']:checked")
+            for cb in checked_boxes: 
+                driver.execute_script("arguments[0].click();", cb)
+        except: pass
         
         # --- 點擊查詢 ---
         status_text.info("🔍 查詢資料中...")
@@ -298,5 +316,6 @@ if run_btn:
             )
         elif df is not None:
             st.warning("⚠️ 此區間查無符合條件的船舶資料")
+
 
 
