@@ -19,12 +19,6 @@ st.set_page_config(page_title="花蓮港船舶即時查詢", layout="wide")
 def get_taiwan_time():
     return datetime.utcnow() + timedelta(hours=8)
 
-# --- 關鍵優化：快取 Driver 路徑 ---
-# 加上這個裝飾器，系統就會記住路徑，不會每次都重新下載
-@st.cache_resource
-def get_driver_path():
-    return ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install()
-
 # --- 初始化 Session State ---
 if 'start_date' not in st.session_state:
     st.session_state['start_date'] = get_taiwan_time().date()
@@ -100,28 +94,29 @@ with st.container():
     run_btn = st.button("🚀 開始查詢", type="primary", use_container_width=True)
     st.markdown("---")
 
-# --- 核心邏輯 ---
+# --- 核心爬蟲邏輯 (恢復原始穩定版) ---
 def run_scraper(start_datetime, end_datetime):
     download_dir = os.path.join(os.getcwd(), "temp_downloads")
     if not os.path.exists(download_dir):
         os.makedirs(download_dir)
     
+    # 清理舊檔
     for f in os.listdir(download_dir):
         try: os.remove(os.path.join(download_dir, f))
         except: pass
 
     status_text = st.empty()
-    status_text.info("🚀 啟動引擎中...") # 使用快取後，這裡會快很多
+    status_text.info("🚀 啟動引擎中 (請稍候)...")
     
     driver = None
     try:
+        # --- 恢復原始設定：無 Eager 模式，無快取 ---
         options = webdriver.ChromeOptions()
         options.add_argument("--headless") 
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-gpu")
         options.add_argument("--window-size=1920,1080")
-        options.page_load_strategy = 'eager'
         options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         
         prefs = {
@@ -132,8 +127,8 @@ def run_scraper(start_datetime, end_datetime):
         }
         options.add_experimental_option("prefs", prefs)
         
-        # --- 使用快取的 Driver 路徑 ---
-        service = Service(get_driver_path())
+        # 每次都重新安裝 Driver (雖然慢但最穩定)
+        service = Service(ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install())
         driver = webdriver.Chrome(service=service, options=options)
         
         driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
@@ -144,7 +139,7 @@ def run_scraper(start_datetime, end_datetime):
         status_text.info(f"🔗 連線中...")
         driver.get("https://tpnet.twport.com.tw/IFAWeb/Function?_RedirUrl=/IFAWeb/Reports/HistoryPortShipList")
         
-        wait = WebDriverWait(driver, 15)
+        wait = WebDriverWait(driver, 20)
         
         iframes = driver.find_elements(By.TAG_NAME, "iframe")
         if iframes: driver.switch_to.frame(0)
@@ -152,12 +147,14 @@ def run_scraper(start_datetime, end_datetime):
         try:
             hualien_tab = wait.until(EC.element_to_be_clickable((By.XPATH, "//*[contains(text(),'花蓮港')]")))
             driver.execute_script("arguments[0].click();", hualien_tab)
+            time.sleep(1) # 恢復原始的 sleep
         except: pass
 
         str_start = start_datetime.strftime("%Y/%m/%d %H:%M")
         str_end = end_datetime.strftime("%Y/%m/%d %H:%M")
         
         all_inputs = driver.find_elements(By.TAG_NAME, "input")
+        # 保持這個邏輯，因為它解決了「找不到日期」的 Bug
         visible_text_inputs = [
             i for i in all_inputs 
             if i.get_attribute('type') in ['text', ''] and i.is_displayed()
@@ -167,57 +164,52 @@ def run_scraper(start_datetime, end_datetime):
             status_text.info(f"📝 設定區間: {str_start} ~ {str_end}")
             driver.execute_script(f"arguments[0].value = '{str_start}'; arguments[0].dispatchEvent(new Event('change'));", visible_text_inputs[0])
             driver.execute_script(f"arguments[0].value = '{str_end}'; arguments[0].dispatchEvent(new Event('change'));", visible_text_inputs[1])
-        else:
-            status_text.warning("⚠️ 使用預設日期")
         
-        status_text.info("🔍 查詢中...")
+        status_text.info("🔍 送出查詢...")
         query_btn = driver.find_element(By.XPATH, "//*[contains(@value,'Query') or contains(@value,'查詢')]")
         driver.execute_script("arguments[0].click();", query_btn)
         
-        status_text.info("📥 下載 XML...")
+        # --- 恢復原始：直接等待 5 秒，不急著去檢查檔案 ---
+        status_text.info("⏳ 等待系統生成報表...")
+        time.sleep(5) 
         
+        status_text.info("📥 點擊下載...")
         try:
             driver.switch_to.default_content()
             driver.switch_to.frame(0)
         except: pass
         
         clicked = False
-        for _ in range(10):
-            try:
-                btns = driver.find_elements(By.XPATH, "//*[contains(text(), 'XML') or contains(@value, 'XML')]")
-                for btn in btns:
-                    if btn.is_displayed():
-                        driver.execute_script("arguments[0].click();", btn)
-                        clicked = True
-                        break
-                if clicked: break
-                
-                if not clicked:
-                    export_btns = driver.find_elements(By.XPATH, "//a[contains(@title, 'Export')]")
-                    if not export_btns: export_btns = driver.find_elements(By.XPATH, "//img[contains(@alt, 'Export')]/..")
-                    if export_btns:
-                        driver.execute_script("arguments[0].click();", export_btns[0])
-                        time.sleep(0.5)
-                        xml_items = driver.find_elements(By.XPATH, "//a[contains(text(), 'XML')]")
-                        if xml_items:
-                            driver.execute_script("arguments[0].click();", xml_items[0])
-                            clicked = True
-                            break
-            except: pass
-            time.sleep(0.5)
+        btns = driver.find_elements(By.XPATH, "//*[contains(text(), 'XML') or contains(@value, 'XML')]")
+        for btn in btns:
+            if btn.is_displayed():
+                driver.execute_script("arguments[0].click();", btn)
+                clicked = True
+                break
+        
+        if not clicked:
+            export_btns = driver.find_elements(By.XPATH, "//a[contains(@title, 'Export')]")
+            if not export_btns: export_btns = driver.find_elements(By.XPATH, "//img[contains(@alt, 'Export')]/..")
+            if export_btns:
+                driver.execute_script("arguments[0].click();", export_btns[0])
+                time.sleep(1)
+                xml_items = driver.find_elements(By.XPATH, "//a[contains(text(), 'XML')]")
+                if xml_items:
+                    driver.execute_script("arguments[0].click();", xml_items[0])
 
         downloaded_file = None
-        for _ in range(30):
-            time.sleep(0.5)
+        # 給予充足的時間等待下載
+        for _ in range(20):
+            time.sleep(1)
             files = [f for f in os.listdir(download_dir) if f.endswith('.xml')]
             if files:
                 downloaded_file = os.path.join(download_dir, files[0])
                 break
         
         if not downloaded_file:
-            raise Exception("下載失敗，可能無資料")
+            raise Exception("下載逾時，未找到 XML 檔案")
             
-        status_text.info("⚙️ 解析 XML...")
+        status_text.info("⚙️ 解析資料...")
         
         with open(downloaded_file, 'r', encoding='big5', errors='replace') as f:
             xml_content = f.read().replace('encoding="BIG5"', '').replace('encoding="big5"', '')
