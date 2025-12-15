@@ -211,7 +211,7 @@ def run_scraper_cached(str_start_param, str_end_param):
         query_btn = driver.find_element(By.XPATH, "//*[contains(@value,'Query') or contains(@value,'查詢')]")
         driver.execute_script("arguments[0].click();", query_btn)
         status_text.info("🔍 送出查詢...")
-        time.sleep(4)
+        time.sleep(6)
         
         # 5. 下載 XML (V7 方法 A + 方法 B 邏輯)
         status_text.info("📥 嘗試下載 XML...")
@@ -377,4 +377,5 @@ if manual_run or st.session_state.get('auto_run', False):
             )
         elif df is not None:
             st.warning("⚠️ 此區間查無符合條件的船舶資料")
+
 
