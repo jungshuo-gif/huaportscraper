@@ -17,22 +17,42 @@ from datetime import datetime, timedelta, time as dt_time
 # --- 網頁設定 ---
 st.set_page_config(page_title="花蓮港船舶即時查詢", layout="wide")
 
-# 定義台灣時間 (UTC+8)
-def get_taiwan_time():
-    return datetime.utcnow() + timedelta(hours=8)
+# --- 關鍵函式：取得「鎖定」的時間 (最近的 20 分鐘) ---
+def get_rounded_time(dt=None):
+    if dt is None:
+        dt = get_taiwan_time()
+    # 將分鐘數捨去到最近的 20 分鐘倍數 (例如 14:15 -> 14:00)
+    minute_interval = 20
+    new_minute = (dt.minute // minute_interval) * minute_interval
+    return dt.replace(minute=new_minute, second=0, microsecond=0)
 
-# --- 初始化 Session State ---
-if 'start_date' not in st.session_state:
-    st.session_state['start_date'] = get_taiwan_time().date()
-if 'start_time' not in st.session_state:
-    st.session_state['start_time'] = get_taiwan_time().time()
-if 'end_date' not in st.session_state:
-    st.session_state['end_date'] = get_taiwan_time().date()
-if 'end_time' not in st.session_state:
-    st.session_state['end_time'] = get_taiwan_time().time()
+# --- 初始化 Session State (自動執行邏輯) ---
+if 'init_done' not in st.session_state:
+    # 這是使用者第一次打開網頁
+    now = get_taiwan_time()
+    
+    # 1. 預設設定：未來 24 小時 (使用鎖定的時間 base_time)
+    base_time = get_rounded_time(now)
+    
+    st.session_state['start_date'] = base_time.date()
+    st.session_state['start_time'] = base_time.time()
+    
+    future = base_time + timedelta(hours=24)
+    st.session_state['end_date'] = future.date()
+    st.session_state['end_time'] = future.time()
+    
+    # 2. 開啟自動執行開關 (一進來就跑！)
+    st.session_state['auto_run'] = True
+    
+    # 3. 標記初始化完成
+    st.session_state['init_done'] = True
 
-if 'auto_run' not in st.session_state:
-    st.session_state['auto_run'] = False
+# 補齊其他防呆變數 (保留原本的檢查)
+if 'start_date' not in st.session_state: st.session_state['start_date'] = get_taiwan_time().date()
+if 'start_time' not in st.session_state: st.session_state['start_time'] = get_taiwan_time().time()
+if 'end_date' not in st.session_state: st.session_state['end_date'] = get_taiwan_time().date()
+if 'end_time' not in st.session_state: st.session_state['end_time'] = get_taiwan_time().time()
+if 'auto_run' not in st.session_state: st.session_state['auto_run'] = False
 
 # --- 主畫面標題 ---
 st.title("🚢 花蓮港船舶動態查詢 (Web V10 最終版)")
@@ -102,8 +122,9 @@ with st.container():
     manual_run = st.button("🚀 開始查詢", type="primary", use_container_width=True)
     st.markdown("---")
 
-# --- 核心爬蟲邏輯 ---
-def run_scraper(start_time, end_time):
+# --- 核心爬蟲 (加入快取機制: ttl=1200秒/20分鐘) ---
+@st.cache_data(ttl=1200, show_spinner=False)
+def run_scraper_cached(str_start_param, str_end_param):
     download_dir = os.path.join(os.getcwd(), "temp_downloads")
     if not os.path.exists(download_dir):
         os.makedirs(download_dir)
@@ -165,10 +186,20 @@ def run_scraper(start_time, end_time):
         # =========================================================
 
         # 1. 輸入日期
-        str_start = start_time.strftime("%Y/%m/%d")
-        str_start_time = start_time.strftime("%H:%M")
-        str_end = end_time.strftime("%Y/%m/%d")
-        str_end_time = end_time.strftime("%H:%M")
+       # --- 使用傳入的參數填寫日期 ---
+        # 原本是 str_start = start_time.strftime(...) 
+        # 現在直接用傳進來的參數，不用再轉一次
+        
+        all_inputs = driver.find_elements(By.TAG_NAME, "input")
+        text_inputs = [i for i in all_inputs if i.get_attribute('type') in ['text', '']]
+        visible_inputs = [i for i in text_inputs if i.is_displayed()]
+        
+        if len(visible_inputs) >= 2:
+            # 直接填入傳進來的字串參數
+            driver.execute_script(f"arguments[0].value = '{str_start_param}'; arguments[0].dispatchEvent(new Event('change'));", visible_inputs[0])
+            driver.execute_script(f"arguments[0].value = '{str_end_param}'; arguments[0].dispatchEvent(new Event('change'));", visible_inputs[1])
+        
+    # ... (其餘邏輯不變) ..
         
         all_inputs = driver.find_elements(By.TAG_NAME, "input")
         text_inputs = [i for i in all_inputs if i.get_attribute('type') in ['text', '']]
@@ -348,9 +379,16 @@ if manual_run or st.session_state.get('auto_run', False):
     if start_dt > end_dt:
         st.error("❌ 開始時間不能晚於結束時間")
     else:
-        df = run_scraper(start_dt, end_dt)
+        # ★ 修改點：先轉成字串，再傳給爬蟲 ★
+        s_str = start_dt.strftime("%Y/%m/%d %H:%M")
+        e_str = end_dt.strftime("%Y/%m/%d %H:%M")
+        
+        with st.spinner("⏳ 正在連線更新資料 (若為快取則瞬間顯示)..."):
+            # 呼叫新的快取函式
+            df = run_scraper_cached(s_str, e_str)
+            
         if df is not None and not df.empty:
-            df = df.sort_values(by=["日期", "時間"])
+             # ... (顯示資料的部分不用變) ...
             
             st.success(f"✅ 查詢完成！({start_dt.strftime('%m/%d %H:%M')} - {end_dt.strftime('%m/%d %H:%M')})")
             
@@ -374,6 +412,7 @@ if manual_run or st.session_state.get('auto_run', False):
             )
         elif df is not None:
             st.warning("⚠️ 此區間查無符合條件的船舶資料")
+
 
 
 
