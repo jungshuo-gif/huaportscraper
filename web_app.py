@@ -304,11 +304,7 @@ def run_scraper(start_time, end_time):
                 try: loa = int(round(float(loa_str)))
                 except: loa = 0
 
-                parsed_data.append({
-                    "日期": date_display,
-                    "時間": time_display,
-                    "狀態": ship.find('SP_STS').text,
-                    # --- 處理碼頭名稱 (HUNX005X -> 05號碼頭) ---
+                # --- 先處理碼頭名稱 (邏輯要寫在 append 之前) ---
                 raw_wharf = ship.find('WHARF_CODE').text or ""
                 wharf_display = raw_wharf # 預設顯示原始代碼
                 
@@ -318,10 +314,15 @@ def run_scraper(start_time, end_time):
                     # 抓到數字 (如 005)，轉成整數去掉多餘的0，再補成兩位數 (5 -> 05)
                     wharf_num = int(match.group(1))
                     wharf_display = f"{wharf_num:02d}號碼頭"
-                # ----------------------------------------
-                    "碼頭": wharf_display,  # <--- 這裡改成使用處理過的變數
+                # ------------------------------------------------
+
+                # --- 再建立資料字典 ---
+                parsed_data.append({
+                    "日期": date_display,
+                    "時間": time_display,
+                    "狀態": ship.find('SP_STS').text,
+                    "碼頭": wharf_display,  # <--- 直接使用上面算好的變數
                     "中文船名": cname,
-                    # ... (後面不用動) ...
                     "長度(m)": loa,
                     "英文船名": ship.find('VESSEL_ENAME').text,
                     "代理行": agent_name,  
@@ -373,6 +374,7 @@ if manual_run or st.session_state.get('auto_run', False):
             )
         elif df is not None:
             st.warning("⚠️ 此區間查無符合條件的船舶資料")
+
 
 
 
