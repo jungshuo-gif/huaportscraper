@@ -319,15 +319,9 @@ def run_scraper(start_time, end_time):
                     wharf_num = int(match.group(1))
                     wharf_display = f"{wharf_num:02d}號碼頭"
                 # ----------------------------------------
-
-                parsed_data.append({
-                    "日期": date_display,
-                    "時間": time_display,
-                    "狀態": ship.find('SP_STS').text,
                     "碼頭": wharf_display,  # <--- 這裡改成使用處理過的變數
                     "中文船名": cname,
                     # ... (後面不用動) ...
-                    "中文船名": cname,
                     "長度(m)": loa,
                     "英文船名": ship.find('VESSEL_ENAME').text,
                     "代理行": agent_name,  
@@ -379,5 +373,6 @@ if manual_run or st.session_state.get('auto_run', False):
             )
         elif df is not None:
             st.warning("⚠️ 此區間查無符合條件的船舶資料")
+
 
 
