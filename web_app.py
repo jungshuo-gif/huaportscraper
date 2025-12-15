@@ -214,11 +214,10 @@ def run_scraper_cached(str_start_param, str_end_param):
             target_date_inputs = [text_inputs[0], text_inputs[1]]
             
         if len(target_date_inputs) >= 2:
-            val_start = f"{str_start} {str_start_time}"
-            val_end = f"{str_end} {str_end_time}"
-            driver.execute_script(f"arguments[0].value = '{val_start}'; arguments[0].dispatchEvent(new Event('change'));", target_date_inputs[0])
-            driver.execute_script(f"arguments[0].value = '{val_end}'; arguments[0].dispatchEvent(new Event('change'));", target_date_inputs[1])
-            status_text.info(f"📝 查詢區間：{val_start} ~ {val_end}")
+            # 直接使用傳進來的參數 (str_start_param 已經是 "YYYY/MM/DD HH:MM")
+            driver.execute_script(f"arguments[0].value = '{str_start_param}'; arguments[0].dispatchEvent(new Event('change'));", target_date_inputs[0])
+            driver.execute_script(f"arguments[0].value = '{str_end_param}'; arguments[0].dispatchEvent(new Event('change'));", target_date_inputs[1])
+            status_text.info(f"📝 查詢區間：{str_start_param} ~ {str_end_param}")
         else:
             status_text.warning("⚠️ 警告：無法自動填入日期")
 
@@ -416,6 +415,7 @@ if manual_run or st.session_state.get('auto_run', False):
             )
         elif df is not None:
             st.warning("⚠️ 此區間查無符合條件的船舶資料")
+
 
 
 
