@@ -239,7 +239,13 @@ def run_scraper_cached(str_start_param, str_end_param):
         status_text.info("🔍 送出查詢，請稍候...")
         time.sleep(4)
         
-        # 5. 下載 XML
+        # 4. 點擊查詢
+        query_btn = driver.find_element(By.XPATH, "//*[contains(@value,'Query') or contains(@value,'查詢')]")
+        driver.execute_script("arguments[0].click();", query_btn)
+        status_text.info("🔍 送出查詢...")
+        time.sleep(4)
+        
+        # 5. 下載 XML (V7 方法 A + 方法 B 邏輯)
         status_text.info("📥 嘗試下載 XML...")
         try:
             try:
@@ -248,9 +254,8 @@ def run_scraper_cached(str_start_param, str_end_param):
             except: pass
             
             clicked = False
-            files_before = set(os.listdir(download_dir))
             
-            # 方法 A: 直接按鈕
+            # 方法 A: 尋找直接的 XML 按鈕
             if not clicked:
                 try:
                     btns = driver.find_elements(By.XPATH, "//*[contains(text(), 'XML') or contains(@value, 'XML')]")
@@ -261,7 +266,7 @@ def run_scraper_cached(str_start_param, str_end_param):
                             break
                 except: pass
             
-            # 方法 B: 匯出選單
+            # 方法 B: 尋找 Export 圖示或連結
             if not clicked:
                 try:
                     export_btns = driver.find_elements(By.XPATH, "//a[contains(@title, 'Export') or contains(@title, '匯出')]")
@@ -277,8 +282,8 @@ def run_scraper_cached(str_start_param, str_end_param):
                 except: pass
             
             if not clicked:
-                raise Exception("找不到 XML 下載按鈕")
-
+                raise Exception("找不到 XML 下載按鈕 (V7邏輯)")
+                
             # 等待下載完成
             waited = 0
             downloaded_file = None
@@ -415,6 +420,7 @@ if manual_run or st.session_state.get('auto_run', False):
             )
         elif df is not None:
             st.warning("⚠️ 此區間查無符合條件的船舶資料")
+
 
 
 
