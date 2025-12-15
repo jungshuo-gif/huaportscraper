@@ -9,6 +9,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 from webdriver_manager.core.os_manager import ChromeType
 from selenium.webdriver.support.ui import Select
 import time
+import re  # <--- 請確保有加入這一行 (用於提取數字)
 import os
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, time as dt_time
@@ -307,7 +308,25 @@ def run_scraper(start_time, end_time):
                     "日期": date_display,
                     "時間": time_display,
                     "狀態": ship.find('SP_STS').text,
-                    "碼頭": ship.find('WHARF_CODE').text,
+                    # --- 處理碼頭名稱 (HUNX005X -> 05號碼頭) ---
+                raw_wharf = ship.find('WHARF_CODE').text or ""
+                wharf_display = raw_wharf # 預設顯示原始代碼
+                
+                # 嘗試抓取代碼中的數字
+                match = re.search(r'(\d+)', raw_wharf)
+                if match:
+                    # 抓到數字 (如 005)，轉成整數去掉多餘的0，再補成兩位數 (5 -> 05)
+                    wharf_num = int(match.group(1))
+                    wharf_display = f"{wharf_num:02d}號碼頭"
+                # ----------------------------------------
+
+                parsed_data.append({
+                    "日期": date_display,
+                    "時間": time_display,
+                    "狀態": ship.find('SP_STS').text,
+                    "碼頭": wharf_display,  # <--- 這裡改成使用處理過的變數
+                    "中文船名": cname,
+                    # ... (後面不用動) ...
                     "中文船名": cname,
                     "長度(m)": loa,
                     "英文船名": ship.find('VESSEL_ENAME').text,
@@ -360,4 +379,5 @@ if manual_run or st.session_state.get('auto_run', False):
             )
         elif df is not None:
             st.warning("⚠️ 此區間查無符合條件的船舶資料")
+
 
