@@ -282,9 +282,11 @@ def run_scraper(start_time, end_time):
                 gt_str = ship.find('GROSS_TOA').text or "0"
                 try: gt = int(round(float(gt_str)))
                 except: gt = 0
-                
-                # 已移除小船過濾邏輯
-                
+                    
+                # ★★★ 新增過濾邏輯 ★★★
+                if gt < 500: continue
+                # ★★★★★★★★★★★★★★★★★
+                                
                 pilot_time_raw = ship.find('PILOT_EXP_TM').text or ""
                 date_display, time_display = "", ""
                 if len(pilot_time_raw) >= 12:
@@ -358,3 +360,4 @@ if manual_run or st.session_state.get('auto_run', False):
             )
         elif df is not None:
             st.warning("⚠️ 此區間查無符合條件的船舶資料")
+
