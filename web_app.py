@@ -288,7 +288,7 @@ def run_scraper_cached(str_start_param, str_end_param):
                 gt_str = ship.find('GROSS_TOA').text or "0"
                 try: gt = int(round(float(gt_str)))
                 except: gt = 0
-                
+                if gt <= 500 : continue
                 # V7 有過濾，但後來要求全部顯示，所以這裡不做過濾
                 
                 pilot_time_raw = ship.find('PILOT_EXP_TM').text or ""
@@ -377,3 +377,4 @@ if manual_run or st.session_state.get('auto_run', False):
             )
         elif df is not None:
             st.warning("⚠️ 此區間查無符合條件的船舶資料")
+
