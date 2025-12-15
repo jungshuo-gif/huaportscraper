@@ -17,6 +17,10 @@ from datetime import datetime, timedelta, time as dt_time
 # --- 網頁設定 ---
 st.set_page_config(page_title="花蓮港船舶即時查詢", layout="wide")
 
+# 定義台灣時間 (UTC+8)
+def get_taiwan_time():
+    return datetime.utcnow() + timedelta(hours=8)
+    
 # --- 關鍵函式：取得「鎖定」的時間 (最近的 20 分鐘) ---
 def get_rounded_time(dt=None):
     if dt is None:
@@ -412,6 +416,7 @@ if manual_run or st.session_state.get('auto_run', False):
             )
         elif df is not None:
             st.warning("⚠️ 此區間查無符合條件的船舶資料")
+
 
 
 
