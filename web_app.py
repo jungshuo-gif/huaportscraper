@@ -41,26 +41,35 @@ def update_time_fields():
     """單選鈕改變時,即時更新輸入框內容"""
     now = get_taiwan_time()
     opt = st.session_state.temp_option
-    new_sd, new_st = now.date(), now.time()
-    new_ed, new_et = now.date(), now.time()
+    
+    # 先取得當前輸入框的值作為基準
+    new_sd = st.session_state.get('start_date_input', now.date())
+    new_st = st.session_state.get('start_time_input', now.time())
+    new_ed = st.session_state.get('end_date_input', now.date())
+    new_et = st.session_state.get('end_time_input', now.time())
 
     if opt == "未來 24H":
+        new_sd, new_st = now.date(), now.time()
         f = now + timedelta(hours=24)
         new_ed, new_et = f.date(), f.time()
     elif opt == "未來 3 日":
+        new_sd, new_st = now.date(), now.time()
         f = now + timedelta(hours=72)
         new_ed, new_et = f.date(), f.time()
     elif opt == "前 7 日":
         p = now - timedelta(days=7)
         new_sd, new_st = p.date(), dt_time(0, 0)
+        new_ed, new_et = now.date(), now.time()
     elif opt == "本月整月":
         first_day = now.replace(day=1, hour=0, minute=0)
         new_sd, new_st = first_day.date(), first_day.time()
+        new_ed, new_et = now.date(), now.time()
 
-    st.session_state.sd_key = new_sd
-    st.session_state.st_key = new_st
-    st.session_state.ed_key = new_ed
-    st.session_state.et_key = new_et
+    # 直接更新到輸入框的 key
+    st.session_state.start_date_input = new_sd
+    st.session_state.start_time_input = new_st
+    st.session_state.end_date_input = new_ed
+    st.session_state.end_time_input = new_et
     
     if opt != "手動調整":
         st.session_state.trigger_search = True
@@ -84,21 +93,21 @@ with col_opt:
     )
 
 # 初始化日期時間
-if 'sd_key' not in st.session_state:
-    st.session_state.sd_key = now.date()
-    st.session_state.st_key = now.time()
+if 'start_date_input' not in st.session_state:
+    st.session_state.start_date_input = now.date()
+    st.session_state.start_time_input = now.time()
     f = now + timedelta(hours=24)
-    st.session_state.ed_key = f.date()
-    st.session_state.et_key = f.time()
+    st.session_state.end_date_input = f.date()
+    st.session_state.end_time_input = f.time()
 
 with col_sd:
-    start_date = st.date_input("開始日期", value=st.session_state.sd_key, key="start_date_input")
+    start_date = st.date_input("開始日期", key="start_date_input")
 with col_st:
-    start_time = st.time_input("開始時間", value=st.session_state.st_key, key="start_time_input")
+    start_time = st.time_input("開始時間", key="start_time_input")
 with col_ed:
-    end_date = st.date_input("結束日期", value=st.session_state.ed_key, key="end_date_input")
+    end_date = st.date_input("結束日期", key="end_date_input")
 with col_et:
-    end_time = st.time_input("結束時間", value=st.session_state.et_key, key="end_time_input")
+    end_time = st.time_input("結束時間", key="end_time_input")
 
 # 組合完整時間
 start_dt = datetime.combine(start_date, start_time)
@@ -121,7 +130,7 @@ def run_scraper(start_time, end_time):
             pass
 
     status_text = st.empty()
-    status_text.info("🚀 正在啟動雲端瀏覽器核心...")
+    status_text.info("🔄 正在啟動雲端瀏覽器核心...")
     
     driver = None
     try:
@@ -152,7 +161,7 @@ def run_scraper(start_time, end_time):
             'downloadPath': download_dir
         })
         
-        status_text.info(f"🔗 連線中...")
+        status_text.info(f"🔄 連線中...")
         driver.get("https://tpnet.twport.com.tw/IFAWeb/Function?_RedirUrl=/IFAWeb/Reports/HistoryPortShipList")
         
         wait = WebDriverWait(driver, 20)
@@ -193,13 +202,13 @@ def run_scraper(start_time, end_time):
             )
         
         # 點擊查詢
-        status_text.info("🔍 查詢資料中...")
+        status_text.info("🔄 查詢資料中...")
         query_btn = driver.find_element(By.XPATH, "//*[contains(@value,'Query') or contains(@value,'查詢')]")
         driver.execute_script("arguments[0].click();", query_btn)
         time.sleep(5)
         
         # 下載 XML
-        status_text.info("📥 嘗試下載報表...")
+        status_text.info("🔄 嘗試下載報表...")
         try:
             driver.switch_to.default_content()
             driver.switch_to.frame(0)
@@ -237,7 +246,7 @@ def run_scraper(start_time, end_time):
         if not downloaded_file:
             raise Exception("未偵測到下載檔案")
             
-        status_text.info("⚙️ 解析資料 (Big5)...")
+        status_text.info("🔄 解析資料 (Big5)...")
         
         with open(downloaded_file, 'r', encoding='big5', errors='replace') as f:
             xml_content = f.read().replace('encoding="BIG5"', '').replace('encoding="big5"', '')
