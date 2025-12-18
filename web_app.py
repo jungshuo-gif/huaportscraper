@@ -31,10 +31,17 @@ def split_date_range(start, end):
         # 下一段從結束點後 1 分鐘開始，避免資料重疊
         current_start = current_end + timedelta(minutes=1)
     return segments
+    
+# --- 2. 初始化與連動邏輯 ---
 
-# --- 2. 初始化與 UI 連動邏輯 ---
-if 'trigger_search' not in st.session_state:
-    st.session_state.trigger_search = False
+# 檢查是否為「第一次進入網頁」
+if 'first_run' not in st.session_state:
+    st.session_state.first_run = True      # 標記已經執行過初次載入
+    st.session_state.trigger_search = True # 強制啟動第一次查詢
+
+# (原本就有的其他初始化)
+if 'last_option' not in st.session_state:
+    st.session_state.last_option = "未來 24H"
 
 def update_time_fields():
     """單選鈕改變時，即時更新輸入框內容"""
@@ -216,3 +223,4 @@ if st.session_state.trigger_search:
         st.download_button("📥 下載完整報表", csv, f"Monthly_Report_{now.strftime('%m%d')}.csv", use_container_width=True)
     else:
         st.warning("⚠️ 所選區間內查無船舶資料。")
+
