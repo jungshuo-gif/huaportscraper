@@ -20,7 +20,19 @@ st.set_page_config(page_title="花蓮港船舶即時查詢", layout="wide")
 # 定義台灣時間 (UTC+8)
 def get_taiwan_time():
     return datetime.utcnow() + timedelta(hours=8)
-
+    
+def split_date_range(start, end):
+    """將長區間拆分為多個 7 天內的區段"""
+    segments = []
+    current_start = start
+    while current_start < end:
+        # 結束點為開始點 + 7天，但不超過最終結束時間
+        current_end = min(current_start + timedelta(days=7), end)
+        segments.append((current_start, current_end))
+        # 下一段從結束點後 1 分鐘開始，避免資料重疊
+        current_start = current_end + timedelta(minutes=1)
+    return segments
+    
 # --- 初始化 Session State ---
 if 'start_date' not in st.session_state:
     st.session_state['start_date'] = get_taiwan_time().date()
@@ -374,6 +386,7 @@ if manual_run or st.session_state.get('auto_run', False):
             )
         elif df is not None:
             st.warning("⚠️ 此區間查無符合條件的船舶資料")
+
 
 
 
