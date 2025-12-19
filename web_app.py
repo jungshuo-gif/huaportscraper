@@ -130,76 +130,50 @@ def run_scraper_segment(start_time, end_time, step_text=""):
             if xml_btns: driver.execute_script("arguments[0].click();", xml_btns[0])
             
             # 等待檔案
-            # --- 等待檔案 ---
-        downloaded_file = None
-        for _ in range(15):
-            time.sleep(1)
-            files = [f for f in os.listdir(download_dir) if f.endswith('.xml')]
-            if files:
-                downloaded_file = os.path.join(download_dir, files[0])
-                break
-        
-        if not downloaded_file:
-            raise Exception("未偵測到下載檔案")
+            downloaded_file = None
+            for _ in range(15):
+                time.sleep(1)
+                xml_fs = [os.path.join(download_dir, f) for f in os.listdir(download_dir) if f.lower().endswith('.xml')]
+                if xml_fs:
+                    downloaded_file = max(xml_fs, key=os.path.getmtime)
+                    break
             
-        status_text.info("⚙️ 解析資料 (Big5)...")
-        
-        with open(downloaded_file, 'r', encoding='big5', errors='replace') as f:
-            xml_content = f.read().replace('encoding="BIG5"', '').replace('encoding="big5"', '')
-            
-        root = ET.fromstring(xml_content)
-        parsed_data = []
-        
-        for ship in root.findall('SHIP'):
-            try:
-                cname = ship.find('VESSEL_CNAME').text or ""
-                
-                gt_str = ship.find('GROSS_TOA').text or "0"
-                try: gt = int(round(float(gt_str)))
-                except: gt = 0
-                
-                if gt <= 500 and "東湧8號" not in cname: continue
-                
-                pilot_time_raw = ship.find('PILOT_EXP_TM').text or ""
-                date_display, time_display = "", ""
-                if len(pilot_time_raw) >= 12:
-                    date_display = f"{pilot_time_raw[4:6]}/{pilot_time_raw[6:8]}"
-                    time_display = f"{pilot_time_raw[8:10]}:{pilot_time_raw[10:12]}"
-                
-                raw_agent = ship.find('PBG_NAME').text or ""
-                agent_full = raw_agent.strip()
-                if "台灣船運" in agent_full: agent_name = "台船"
-                elif "海軍" in agent_full: agent_name = "海軍"
-                else: agent_name = agent_full[:2] 
-                
-                loa_str = ship.find('LOA').text or "0"
-                try: loa = int(round(float(loa_str)))
-                except: loa = 0
+            if not downloaded_file: return pd.DataFrame()
 
-                parsed_data.append({
-                    "日期": date_display,
-                    "時間": time_display,
-                    "狀態": ship.find('SP_STS').text,
-                    "碼頭": ship.find('WHARF_CODE').text,
-                    "中文船名": cname,
-                    "長度(m)": loa,
-                    "英文船名": ship.find('VESSEL_ENAME').text,
-                    "代理行": agent_name,  
-                    "總噸位": gt,
-                    "前一港": ship.find('BEFORE_PORT').text,
-                    "下一港": ship.find('NEXT_PORT').text,
+            # 解析 XML
+            with open(downloaded_file, 'r', encoding='big5', errors='replace') as f:
+                content = f.read().replace('encoding="BIG5"', '').replace('encoding="big5"', '')
+            
+            root = ET.fromstring(content)
+            parsed = []
+            for ship in root.findall('SHIP'):
+                gt_n = ship.find('GROSS_TOA')
+                gt = int(round(float(gt_n.text))) if gt_n is not None and gt_n.text else 0
+                if gt < 500: continue
+
+                w_n = ship.find('WHARF_CODE')
+                raw_w = w_n.text if w_n is not None else ""
+                w_label = f"{int(re.search(r'(\d+)', raw_w).group(1)):02d}號碼頭" if raw_w and re.search(r'(\d+)', raw_w) else raw_w
+
+                t_n = ship.find('PILOT_EXP_TM')
+                raw_t = t_n.text if t_n is not None else ""
+                d_s, t_s = "未排定", "未排定"
+                if len(raw_t) >= 12: d_s, t_s = f"{raw_t[4:6]}/{raw_t[6:8]}", f"{raw_t[8:10]}:{raw_t[10:12]}"
+
+                parsed.append({
+                    "日期": d_s, "時間": t_s, "狀態": ship.find('SP_STS').text if ship.find('SP_STS') is not None else "",
+                    "碼頭": w_label, "中文船名": ship.find('VESSEL_CNAME').text if ship.find('VESSEL_CNAME') is not None else "",
+                    "總噸位": gt, "長度(m)": int(round(float(ship.find('LOA').text))) if ship.find('LOA') is not None else 0,
+                    "代理行": (ship.find('PBG_NAME').text or "")[:2]
                 })
-            except: continue
-        
-        status_text.empty()
-        return pd.DataFrame(parsed_data)
 
-    except Exception as e:
-        status_text.error(f"❌ 錯誤: {str(e)}")
-        return None
-    finally:
-        if driver: driver.quit()
-
+            driver.quit()
+            status.update(label=f"✅ 區段完成", state="complete", expanded=False)
+            return pd.DataFrame(parsed)
+        except Exception as e:
+            st.error(f"❌ 錯誤: {e}")
+            if 'driver' in locals(): driver.quit()
+            return pd.DataFrame()
 
 # --- 5. UI 介面佈局 ---
 st.title("🚢 花蓮港船舶動態查詢")
