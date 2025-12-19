@@ -79,18 +79,18 @@ st.title("🚢 花蓮港船舶即時查詢系統")
 
 now = get_taiwan_time()
 
-# 時間範圍選擇
-col_opt, col_sd, col_st, col_ed, col_et = st.columns([2, 2, 1.5, 2, 1.5])
+# 時間範圍選擇 - 橫向單選
+time_option = st.radio(
+    "快速選擇",
+    ["未來 24H", "未來 3 日", "前 7 日", "本月整月", "手動調整"],
+    index=0,
+    key="temp_option",
+    on_change=update_time_fields,
+    horizontal=True
+)
 
-with col_opt:
-    time_option = st.radio(
-        "快速選擇",
-        ["未來 24H", "未來 3 日", "前 7 日", "本月整月", "手動調整"],
-        index=0,
-        key="temp_option",
-        on_change=update_time_fields,
-        horizontal=False
-    )
+# 日期時間輸入 - 4欄布局
+col_sd, col_st, col_ed, col_et = st.columns([2, 1.5, 2, 1.5])
 
 # 初始化日期時間
 if 'start_date_input' not in st.session_state:
@@ -253,35 +253,44 @@ def run_scraper(start_time, end_time):
         
         for ship in root.findall('SHIP'):
             try:
+                # 取得船名
                 cname_node = ship.find('VESSEL_CNAME')
                 cname = cname_node.text if cname_node is not None else ""
                 
-                gt_str = ship.find('GROSS_TOA').text or "0"
+                # 取得總噸位
+                gt_node = ship.find('GROSS_TOA')
+                gt_str = gt_node.text if gt_node is not None else "0"
                 try:
                     gt = int(round(float(gt_str)))
                 except:
                     gt = 0
                 
-                # 只過濾 500 噸以下
+                # 只過濾 500 噸以下 (< 500 會被過濾，>= 500 會保留)
                 if gt < 500:
                     continue
                 
-                pilot_time_raw = ship.find('PILOT_EXP_TM').text or ""
+                # 取得引水預定時間
+                pilot_time_node = ship.find('PILOT_EXP_TM')
+                pilot_time_raw = pilot_time_node.text if pilot_time_node is not None else ""
                 date_display, time_display = "", ""
                 if len(pilot_time_raw) >= 12:
                     date_display = f"{pilot_time_raw[4:6]}/{pilot_time_raw[6:8]}"
                     time_display = f"{pilot_time_raw[8:10]}:{pilot_time_raw[10:12]}"
                 
-                raw_agent = ship.find('PBG_NAME').text or ""
+                # 取得代理行
+                agent_node = ship.find('PBG_NAME')
+                raw_agent = agent_node.text if agent_node is not None else ""
                 agent_full = raw_agent.strip()
                 if "台灣船運" in agent_full:
                     agent_name = "台船"
                 elif "海軍" in agent_full:
                     agent_name = "海軍"
                 else:
-                    agent_name = agent_full[:2]
+                    agent_name = agent_full[:2] if agent_full else ""
                 
-                loa_str = ship.find('LOA').text or "0"
+                # 取得船長
+                loa_node = ship.find('LOA')
+                loa_str = loa_node.text if loa_node is not None else "0"
                 try:
                     loa = int(round(float(loa_str)))
                 except:
