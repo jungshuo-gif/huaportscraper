@@ -154,8 +154,8 @@ def run_scraper_segment(start_time, end_time, step_text=""):
                 gt = int(round(float(gt_n.text))) if gt_n is not None and gt_n.text else 0
                 cname = ship.find('VESSEL_CNAME').text or ""
                 
-                # 過濾：GT < 500 (東湧8號例外)
-                if gt < 500 and "東湧8號" not in cname: continue
+                # 過濾：GT < 500
+                if gt < 500: continue
 
                 w_n = ship.find('WHARF_CODE')
                 raw_w = w_n.text if w_n is not None else ""
