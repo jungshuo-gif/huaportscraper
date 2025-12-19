@@ -29,7 +29,12 @@ def split_date_range(start, end):
         current_start = current_end + timedelta(minutes=1)
     return segments
 
-_option' not in st.session_state:
+# --- 2. 初始化與連動邏輯 ---
+if 'first_run' not in st.session_state:
+    st.session_state.first_run = True
+    st.session_state.trigger_search = True
+
+if 'last_option' not in st.session_state:
     st.session_state.last_option = "未來 24H"
 
 def update_time_fields():
@@ -107,9 +112,6 @@ with col_et:
 # 組合完整時間
 start_dt = datetime.combine(start_date, start_time)
 end_dt = datetime.combine(end_date, end_time)
-
-# 查詢按鈕
-run_btn = st.button("🔍 開始查詢", type="primary", use_container_width=True)
 
 # --- 4. 核心爬蟲邏輯 ---
 def run_scraper(start_time, end_time):
@@ -251,7 +253,8 @@ def run_scraper(start_time, end_time):
         
         for ship in root.findall('SHIP'):
             try:
-                cname = ship.find('VESSEL_CNAME').text or ""
+                cname_node = ship.find('VESSEL_CNAME')
+                cname = cname_node.text if cname_node is not None else ""
                 
                 gt_str = ship.find('GROSS_TOA').text or "0"
                 try:
@@ -283,19 +286,34 @@ def run_scraper(start_time, end_time):
                     loa = int(round(float(loa_str)))
                 except:
                     loa = 0
+                
+                ename_node = ship.find('VESSEL_ENAME')
+                ename = ename_node.text if ename_node is not None else ""
+                
+                before_port_node = ship.find('BEFORE_PORT')
+                before_port = before_port_node.text if before_port_node is not None else ""
+                
+                next_port_node = ship.find('NEXT_PORT')
+                next_port = next_port_node.text if next_port_node is not None else ""
+                
+                sp_sts_node = ship.find('SP_STS')
+                sp_sts = sp_sts_node.text if sp_sts_node is not None else ""
+                
+                wharf_node = ship.find('WHARF_CODE')
+                wharf = wharf_node.text if wharf_node is not None else ""
 
                 parsed_data.append({
                     "日期": date_display,
                     "時間": time_display,
-                    "狀態": ship.find('SP_STS').text,
-                    "碼頭": ship.find('WHARF_CODE').text,
+                    "狀態": sp_sts,
+                    "碼頭": wharf,
                     "中文船名": cname,
                     "長度(m)": loa,
-                    "英文船名": ship.find('VESSEL_ENAME').text,
-                    "代理行": agent_name,
+                    "英文船名": ename,
                     "總噸位": gt,
-                    "前一港": ship.find('BEFORE_PORT').text,
-                    "下一港": ship.find('NEXT_PORT').text,
+                    "前一港": before_port,
+                    "下一港": next_port,
+                    "代理行": agent_name,
                 })
             except:
                 continue
