@@ -136,7 +136,7 @@ def run_scraper_segment(start_time, end_time, step_text=""):
                 except: gt = 0
                 
                 # 修正過濾邏輯：確保只過濾掉 500 以下的，但東湧 8 號除外
-                if gt < 500 and "東湧8號" not in cname: continue
+                if gt < 500: continue
                 
                 # 時間解析
                 raw_tm = ship.find('PILOT_EXP_TM').text if ship.find('PILOT_EXP_TM') is not None else ""
@@ -235,3 +235,4 @@ if st.session_state.trigger_search:
         st.download_button("📥 下載完整報表", csv, f"Report_{start_dt.strftime('%m%d')}.csv", use_container_width=True)
     else:
         st.warning("⚠️ 該區間查無符合條件的船舶資料。")
+
