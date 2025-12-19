@@ -1,3 +1,7 @@
+# 這七日時間不是現在-7，也不能查詢
+# 欄位變成錯誤
+# 查詢中途氏是轉圈
+
 import streamlit as st
 import pandas as pd
 from selenium import webdriver
