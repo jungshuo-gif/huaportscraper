@@ -18,16 +18,17 @@ from datetime import datetime, timedelta, time as dt_time
 st.set_page_config(page_title="花蓮港船舶即時查詢", layout="wide")
 
 def get_taiwan_time():
-    """取得當前台灣時間 (抹除秒數與微秒，確保符合網站 7 天限制)"""
+    """取得當前台灣時間 (抹除微秒)"""
     return (datetime.utcnow() + timedelta(hours=8)).replace(second=0, microsecond=0)
 
 def split_date_range(start, end):
+    """將長區間拆分為多個 7 天內的區段"""
     segments = []
     curr_start = start
     while curr_start < end:
         curr_end = min(curr_start + timedelta(days=7), end)
         segments.append((curr_start, curr_end))
-        curr_start = curr_end + timedelta(minutes=1) # 避開重疊
+        curr_start = curr_end + timedelta(minutes=1)
     return segments
 
 # --- 2. 初始化 Session State ---
@@ -38,7 +39,7 @@ if 'first_load' not in st.session_state:
 if 'last_option' not in st.session_state:
     st.session_state.last_option = "未來 24H"
 
-# --- 3. UI 連動回調 ---
+# --- 3. UI 連動回調 (修正前七日邏輯) ---
 def on_ui_change():
     now = get_taiwan_time()
     opt = st.session_state.ui_option
@@ -52,9 +53,9 @@ def on_ui_change():
     elif opt == "未來 3 日":
         f = now + timedelta(hours=72); ed, et_val = f.date(), f.time()
     elif opt == "前 7 日":
+        # 修正點：從 7 天前的 00:00 開始查詢
         p = now - timedelta(days=7)
         sd, st_val = p.date(), dt_time(0, 0)
-        # 結束時間設為現在
         ed, et_val = now.date(), now.time()
     elif opt == "本月整月":
         first_day = now.replace(day=1, hour=0, minute=0)
@@ -68,7 +69,7 @@ def on_ui_change():
     if opt != "手動調整":
         st.session_state.trigger_search = True
 
-# --- 4. 核心爬蟲函數 (修正縮排與解析邏輯) ---
+# --- 4. 核心爬蟲函數 (補齊 11 個欄位) ---
 def run_scraper_segment(start_time, end_time, step_text=""):
     download_dir = os.path.join(os.getcwd(), "temp_downloads")
     if not os.path.exists(download_dir): os.makedirs(download_dir)
@@ -76,8 +77,7 @@ def run_scraper_segment(start_time, end_time, step_text=""):
         try: os.remove(os.path.join(download_dir, f))
         except: pass
 
-    # 確保所有邏輯都在 st.status 裡面，這樣才不會只剩轉圈圈
-    with st.status(f"🚢 正在連線查詢 {step_text}...", expanded=True) as status:
+    with st.status(f"🚢 正在執行 {step_text} 查詢...", expanded=True) as status:
         try:
             options = webdriver.ChromeOptions()
             options.add_argument("--headless=new")
@@ -108,21 +108,11 @@ def run_scraper_segment(start_time, end_time, step_text=""):
             
             btn = driver.find_element(By.XPATH, "//*[contains(@value,'Query') or contains(@value,'查詢')]")
             driver.execute_script("arguments[0].click();", btn)
-            time.sleep(1)
+            time.sleep(4)
             
-            # 檢查 Alert
-            try:
-                alert = driver.switch_to.alert
-                msg = alert.text
-                alert.accept()
-                raise Exception(f"網站限制：{msg}")
-            except: pass
-
-            time.sleep(3)
             xml_btns = driver.find_elements(By.XPATH, "//*[contains(text(), 'XML') or contains(@value, 'XML')]")
             if xml_btns: driver.execute_script("arguments[0].click();", xml_btns[0])
             
-            # --- 等待檔案下載 ---
             downloaded_file = None
             for _ in range(15):
                 time.sleep(1)
@@ -131,10 +121,8 @@ def run_scraper_segment(start_time, end_time, step_text=""):
                     downloaded_file = os.path.join(download_dir, files[0])
                     break
             
-            if not downloaded_file:
-                raise Exception("未偵測到下載檔案 (可能該區段無資料)")
+            if not downloaded_file: raise Exception("未偵測到檔案下載")
                 
-            status.write("⚙️ 解析 XML 資料...")
             with open(downloaded_file, 'r', encoding='big5', errors='replace') as f:
                 content = f.read().replace('encoding="BIG5"', '').replace('encoding="big5"', '')
             
@@ -142,37 +130,47 @@ def run_scraper_segment(start_time, end_time, step_text=""):
             parsed_data = []
             
             for ship in root.findall('SHIP'):
-                try:
-                    cname = ship.find('VESSEL_CNAME').text if ship.find('VESSEL_CNAME') is not None else ""
-                    gt_node = ship.find('GROSS_TOA')
-                    gt = int(round(float(gt_node.text))) if gt_node is not None and gt_node.text else 0
-                    
-                    if gt <= 500 and "東湧8號" not in cname: continue
-                    
-                    # 時間解析
-                    raw_tm = ship.find('PILOT_EXP_TM').text if ship.find('PILOT_EXP_TM') is not None else ""
-                    d_disp, t_disp = "未排定", "未排定"
-                    if len(raw_tm) >= 12:
-                        d_disp = f"{raw_tm[4:6]}/{raw_tm[6:8]}"
-                        t_disp = f"{raw_tm[8:10]}:{raw_tm[10:12]}"
-                    
-                    # 碼頭安全檢查
-                    raw_wharf = ship.find('WHARF_CODE').text if ship.find('WHARF_CODE') is not None else ""
-                    wharf_label = raw_wharf
-                    if raw_wharf:
-                        match = re.search(r'(\d+)', raw_wharf)
-                        if match:
-                            wharf_label = f"{int(match.group(1)):02d}號碼頭"
+                cname = ship.find('VESSEL_CNAME').text if ship.find('VESSEL_CNAME') is not None else ""
+                gt_val = ship.find('GROSS_TOA').text if ship.find('GROSS_TOA') is not None else "0"
+                try: gt = int(round(float(gt_val)))
+                except: gt = 0
+                
+                # 修正過濾邏輯：確保只過濾掉 500 以下的，但東湧 8 號除外
+                if gt < 500 and "東湧8號" not in cname: continue
+                
+                # 時間解析
+                raw_tm = ship.find('PILOT_EXP_TM').text if ship.find('PILOT_EXP_TM') is not None else ""
+                d_disp, t_disp = "未排定", "未排定"
+                if len(raw_tm) >= 12:
+                    d_disp = f"{raw_tm[4:6]}/{raw_tm[6:8]}"
+                    t_disp = f"{raw_tm[8:10]}:{raw_tm[10:12]}"
+                
+                # 碼頭解析
+                raw_w = ship.find('WHARF_CODE').text if ship.find('WHARF_CODE') is not None else ""
+                w_label = raw_w
+                match = re.search(r'(\d+)', raw_w)
+                if match: w_label = f"{int(match.group(1)):02d}號碼頭"
 
-                    parsed_data.append({
-                        "日期": d_disp, "時間": t_disp,
-                        "狀態": ship.find('SP_STS').text if ship.find('SP_STS') is not None else "",
-                        "碼頭": wharf_label, "中文船名": cname,
-                        "長度(m)": int(round(float(ship.find('LOA').text))) if ship.find('LOA') is not None else 0,
-                        "代理行": (ship.find('PBG_NAME').text or "")[:2],
-                        "總噸位": gt
-                    })
-                except: continue
+                # 代理行解析
+                raw_a = (ship.find('PBG_NAME').text or "").strip()
+                agent = raw_a[:2]
+                if "台灣船運" in raw_a: agent = "台船"
+                elif "海軍" in raw_a: agent = "海軍"
+
+                # 建立完整的 11 個欄位字典
+                parsed_data.append({
+                    "日期": d_disp,
+                    "時間": t_disp,
+                    "狀態": ship.find('SP_STS').text if ship.find('SP_STS') is not None else "",
+                    "碼頭": w_label,
+                    "中文船名": cname,
+                    "長度(m)": int(round(float(ship.find('LOA').text))) if ship.find('LOA') is not None else 0,
+                    "英文船名": ship.find('VESSEL_ENAME').text if ship.find('VESSEL_ENAME') is not None else "",
+                    "總噸位": gt,
+                    "前一港": ship.find('BEFORE_PORT').text if ship.find('BEFORE_PORT') is not None else "",
+                    "下一港": ship.find('NEXT_PORT').text if ship.find('NEXT_PORT') is not None else "",
+                    "代理行": agent
+                })
             
             driver.quit()
             status.update(label=f"✅ 區段查詢完成", state="complete", expanded=False)
@@ -183,12 +181,10 @@ def run_scraper_segment(start_time, end_time, step_text=""):
             status.update(label=f"❌ 錯誤: {str(e)}", state="error")
             return pd.DataFrame()
 
-# --- 5. UI 介面 ---
+# --- 5. UI 介面與觸發 ---
 st.title("🚢 花蓮港船舶動態查詢")
 
 now_init = get_taiwan_time()
-f24 = now_init + timedelta(hours=24)
-
 st.radio(
     "⏱️ **快捷查詢區間 (點選後自動執行)**",
     ["未來 24H", "未來 3 日", "前 7 日", "本月整月", "手動調整"],
@@ -203,8 +199,8 @@ with st.expander("📆 詳細時間確認", expanded=True):
         sd_in = st.date_input("開始日期", key="sd_key", value=now_init.date())
         st_in = st.time_input("開始時間", key="st_key", value=now_init.time(), label_visibility="collapsed")
     with c2:
-        ed_in = st.date_input("結束日期", key="ed_key", value=f24.date())
-        et_in = st.time_input("結束時間", key="et_key", value=f24.time(), label_visibility="collapsed")
+        ed_in = st.date_input("結束日期", key="ed_key", value=now_init.date())
+        et_in = st.time_input("結束時間", key="et_key", value=now_init.time(), label_visibility="collapsed")
 
 start_dt = datetime.combine(sd_in, st_in)
 end_dt = datetime.combine(ed_in, et_in)
@@ -215,7 +211,6 @@ if st.button("🚀 開始查詢", type="primary", use_container_width=True):
 if st.session_state.trigger_search:
     st.session_state.trigger_search = False
     
-    # 延遲機制
     if not st.session_state.first_load and st.session_state.ui_option != "手動調整":
         with st.info("⏳ 準備查詢中，請稍候 2 秒..."):
             time.sleep(2)
@@ -225,14 +220,18 @@ if st.session_state.trigger_search:
     all_dfs = []
     for i, (s, e) in enumerate(segments):
         df_seg = run_scraper_segment(s, e, f"({i+1}/{len(segments)})")
-        if not df_seg.empty:
-            all_dfs.append(df_seg)
+        if not df_seg.empty: all_dfs.append(df_seg)
     
     if all_dfs:
         final_df = pd.concat(all_dfs).drop_duplicates().sort_values(by=["日期", "時間"])
+        
+        # 欄位排序確保符合要求
+        cols = ["日期", "時間", "狀態", "碼頭", "中文船名", "長度(m)", "英文船名", "總噸位", "前一港", "下一港", "代理行"]
+        final_df = final_df[cols]
+        
         st.success(f"🎊 查詢完成！共獲取 {len(final_df)} 筆資料。")
         st.dataframe(final_df, use_container_width=True, hide_index=True)
         csv = final_df.to_csv(index=False).encode('utf-8-sig')
         st.download_button("📥 下載完整報表", csv, f"Report_{start_dt.strftime('%m%d')}.csv", use_container_width=True)
     else:
-        st.warning("⚠️ 該區間查無資料。")
+        st.warning("⚠️ 該區間查無符合條件的船舶資料。")
