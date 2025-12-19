@@ -91,7 +91,7 @@ def run_scraper_segment(start_time, end_time, step_text=""):
         try: os.remove(os.path.join(download_dir, f))
         except: pass
 
-    with st.status(f"🚢 執行查詢 {step_text}...", expanded=True) as status:
+    with st.status(f"🚢 查詢中，請等候約10秒 {step_text}...", expanded=True) as status:
         try:
             options = webdriver.ChromeOptions()
             options.add_argument("--headless=new")
@@ -109,7 +109,7 @@ def run_scraper_segment(start_time, end_time, step_text=""):
             driver.execute_script("arguments[0].click();", h_tab)
 
             v_s, v_e = start_time.strftime("%Y/%m/%d %H:%M"), end_time.strftime("%Y/%m/%d %H:%M")
-            status.write(f"📝 填寫區段: {v_s} ~ {v_e}")
+            status.write(f"📝 填寫時間: {v_s} ~ {v_e}")
             inps = driver.find_elements(By.TAG_NAME, "input")
             d_inps = [i for i in inps if i.get_attribute("value") and i.get_attribute("value").startswith("20")]
             if len(d_inps) >= 2:
@@ -150,11 +150,11 @@ def run_scraper_segment(start_time, end_time, step_text=""):
                 gt_n = ship.find('GROSS_TOA')
                 gt = int(round(float(gt_n.text))) if gt_n is not None and gt_n.text else 0
                 cname = ship.find('VESSEL_CNAME').text or ""
-                if gt < 500 and "東湧8號" not in cname: continue
+                if gt < 500 : continue
 
                 w_n = ship.find('WHARF_CODE')
                 raw_w = w_n.text if w_n is not None else ""
-                w_label = f"{int(re.search(r'(\d+)', raw_w).group(1)):02d}號碼頭" if raw_w and re.search(r'(\d+)', raw_w) else raw_w
+                w_label = f"{int(re.search(r'(\d+)', raw_w).group(1)):02d}號" if raw_w and re.search(r'(\d+)', raw_w) else raw_w
 
                 t_n = ship.find('PILOT_EXP_TM')
                 raw_t = t_n.text if t_n is not None else ""
@@ -183,8 +183,8 @@ now_init = get_taiwan_time()
 f24 = now_init + timedelta(hours=24)
 
 st.radio(
-    "⏱️ **快捷查詢區間 (點選後自動執行)**",
-    ["未來 24H", "未來 3 日", "前 7 日", "本月整月", "手動調整"],
+    "⏱️ **1,預設自動顯示未來24H動態，請向下滑。2,亦可點選按鈕，等待查詢約10秒。**",
+    ["未來 24H", "未來 3 日", "前 7 日", "本月整月", "手動輸入"],
     key="ui_option",
     on_change=on_ui_change,
     horizontal=True
@@ -211,7 +211,7 @@ if st.session_state.ui_option == "未來 24H" and not st.session_state.trigger_s
     if st.session_state.cache_24h_df is not None:
         time_diff = datetime.now() - st.session_state.cache_24h_time
         if time_diff < timedelta(minutes=20):
-            st.success(f"⚡ 顯示緩存資料 (更新時間: {st.session_state.cache_24h_time.strftime('%H:%M:%S')})")
+            st.success(f"⚡ 顯示近20分鐘內資料 (更新時間: {st.session_state.cache_24h_time.strftime('%H:%M')})")
             st.dataframe(st.session_state.cache_24h_df, use_container_width=True, hide_index=True)
             st.stop() # 停止執行後續爬蟲邏輯
 
