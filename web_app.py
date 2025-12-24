@@ -184,13 +184,14 @@ f24 = now_init + timedelta(hours=24)
 
 st.radio(
     "⏱️ **1,預設自動顯示未來24H動態，請向下滑。2,亦可點選按鈕，等待查詢約10秒。**",
-    ["未來 24H", "未來 3 日", "前 7 日", "本月整月", "手動輸入"],
+    ["未來 24H", "未來 3 日", "前 7 日", "本月整月"], # 修改點：已移除「手動輸入」選項
     key="ui_option",
     on_change=on_ui_change,
     horizontal=True
 )
 
-with st.expander("📆 詳細時間確認", expanded=st.session_state.expander_state):
+# 修改點：標題改為「手動輸入」，並保留原本的摺疊狀態邏輯 (預設為 False)
+with st.expander("手動輸入", expanded=st.session_state.expander_state):
     c1, c2 = st.columns(2)
     with c1:
         sd_in = st.date_input("開始日期", key="sd_key", value=now_init.date())
@@ -201,6 +202,10 @@ with st.expander("📆 詳細時間確認", expanded=st.session_state.expander_s
 
 start_dt = datetime.combine(sd_in, st_in)
 end_dt = datetime.combine(ed_in, et_in)
+
+# 修改點：按鈕維持在此處 (預設未展開的區域下方)
+if st.button("🚀 開始查詢", type="primary", use_container_width=True):
+    st.session_state.trigger_search = True
 
 # --- 6. 執行邏輯 (緩存優先) ---
 if st.button("🚀 開始查詢", type="primary", use_container_width=True):
@@ -243,3 +248,4 @@ if st.session_state.trigger_search:
         st.download_button("📥 下載完整報表", csv, f"Report_{start_dt.strftime('%m%d')}.csv", use_container_width=True)
     else:
         st.warning("⚠️ 該區間查無符合條件的船舶資料。")
+
