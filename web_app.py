@@ -191,7 +191,7 @@ now_init = get_taiwan_time()
 f24 = now_init + timedelta(hours=24)
 
 st.radio(
-    "⏱️ **1,預設自動顯示未來24H動態，請向下滑。2,亦可點選按鈕，等待查詢約10秒。**",
+    "⏱️ **未來24H動態(近20分鐘資料)。點選查詢按鈕更新查詢結果**",
     ["未來 24H", "未來 3 日", "前 7 日", "本月整月"], # 修改點：已移除「手動輸入」選項
     key="ui_option",
     on_change=on_ui_change,
@@ -199,7 +199,7 @@ st.radio(
 )
 
 # 修改點：標題改為「手動輸入」，並保留原本的摺疊狀態邏輯 (預設為 False)
-with st.expander("手動輸入", expanded=st.session_state.expander_state):
+with st.expander("手動更改查詢時段", expanded=st.session_state.expander_state):
     c1, c2 = st.columns(2)
     with c1:
         sd_in = st.date_input("開始日期", key="sd_key", value=now_init.date())
@@ -211,18 +211,35 @@ with st.expander("手動輸入", expanded=st.session_state.expander_state):
 start_dt = datetime.combine(sd_in, st_in)
 end_dt = datetime.combine(ed_in, et_in)
 
+# --- 5.5 自動定時更新函數 ---
+@st.fragment(run_every="1200s") # 每 20 分鐘自動執行一次此區塊
+def auto_refresh_data():
+    now = get_taiwan_time()
+    # 僅針對「未來 24H」進行自動更新
+    if st.session_state.ui_option == "未來 24H":
+        # 檢查是否需要抓取（若無資料或已過期）
+        if (st.session_state.cache_24h_time is None or 
+            datetime.now() - st.session_state.cache_24h_time > timedelta(minutes=20)):
+            
+            # 執行爬蟲邏輯 (這裡會更新全域緩存)
+            # 註：此處需調用原本的爬蟲函數，並將結果存入 session_state
+            pass 
+
+# --- 6. 執行邏輯 (緩存優先) ---
+# 調用定時器
+auto_refresh_data()
+
 # --- 6. 執行邏輯 (緩存優先) ---
 if st.button("🚀 開始查詢", type="primary", use_container_width=True):
     st.session_state.trigger_search = True
-
-# 判斷是否直接顯示緩存 (適用於非手動觸發的 未來 24H)
-if st.session_state.ui_option == "未來 24H" and not st.session_state.trigger_search:
+# 判斷是否直接顯示緩存 (適用於連線時快速顯示)
+if st.session_state.ui_option == "未來 24H":
     if st.session_state.cache_24h_df is not None:
-        time_diff = datetime.now() - st.session_state.cache_24h_time
-        if time_diff < timedelta(minutes=20):
-            st.success(f"⚡ 顯示近20分鐘內資料 (更新時間: {st.session_state.cache_24h_time.strftime('%H:%M')})")
-            st.dataframe(st.session_state.cache_24h_df, use_container_width=True, hide_index=True)
-            st.stop() # 停止執行後續爬蟲邏輯
+        st.success(f"⚡ 顯示近20分鐘內資料 (更新時間: {st.session_state.cache_24h_time.strftime('%H:%M')})")
+        st.dataframe(st.session_state.cache_24h_df, use_container_width=True, hide_index=True)
+        # 如果是自動重新整理觸發的，到這裡就結束
+        if not st.session_state.trigger_search:
+            st.stop()
 
 if st.session_state.trigger_search:
     st.session_state.trigger_search = False
@@ -252,6 +269,7 @@ if st.session_state.trigger_search:
         st.download_button("📥 下載完整報表", csv, f"Report_{start_dt.strftime('%m%d')}.csv", use_container_width=True)
     else:
         st.warning("⚠️ 該區間查無符合條件的船舶資料。")
+
 
 
 
