@@ -170,7 +170,7 @@ def run_scraper_segment(start_time, end_time, step_text=""):
                     "代理行": (ship.find('PBG_NAME').text or "")[:2]
                 })
             driver.quit()
-            status.update(label="✅ 區段查詢完成", state="complete", expanded=False)
+            status.update(label="✅ 查詢完成", state="complete", expanded=False)
             return pd.DataFrame(parsed)
         except Exception as e:
             if 'driver' in locals(): driver.quit()
@@ -199,7 +199,7 @@ st.radio(
 )
 
 # 修改點：標題改為「手動輸入」，並保留原本的摺疊狀態邏輯 (預設為 False)
-with st.expander("手動更改查詢時段", expanded=st.session_state.expander_state):
+with st.expander("更改查詢時段", expanded=st.session_state.expander_state):
     c1, c2 = st.columns(2)
     with c1:
         sd_in = st.date_input("開始日期", key="sd_key", value=now_init.date())
@@ -243,7 +243,7 @@ if st.button("🚀 開始查詢", type="primary", use_container_width=True):
 # 判斷是否直接顯示緩存 (快速顯示邏輯)
 if st.session_state.ui_option == "未來 24H" and not st.session_state.trigger_search:
     if st.session_state.cache_24h_df is not None:
-        st.success(f"⚡ 顯示近20分鐘內資料 (更新時間: {st.session_state.cache_24h_time.strftime('%H:%M')})")
+        st.success(f"⚡ 近20分鐘資料 (更新時間: {st.session_state.cache_24h_time.strftime('%H:%M')})")
         st.dataframe(st.session_state.cache_24h_df, use_container_width=True, hide_index=True)
         st.stop() # 停止執行後續爬蟲
 
@@ -276,3 +276,4 @@ if st.session_state.trigger_search:
         st.download_button("📥 下載完整報表", csv, f"Report_{start_dt.strftime('%m%d')}.csv", use_container_width=True)
     else:
         st.warning("⚠️ 該區間查無符合條件的船舶資料。")
+
