@@ -260,9 +260,9 @@ if st.session_state.trigger_search:
         final_df = final_df[cols]
         
         # 更新緩存 (僅針對 24H 查詢)
-if st.session_state.ui_option == "未來 24H":
-    st.session_state.cache_24h_df = final_df
-    st.session_state.cache_24h_time = get_taiwan_time() # 改用台灣時間函數，就會顯示 10:29
+    if st.session_state.ui_option == "未來 24H":
+        st.session_state.cache_24h_df = final_df
+        st.session_state.cache_24h_time = get_taiwan_time() # 改用台灣時間函數，就會顯示 10:29
     
         st.success(f"🎊 查詢完成！共獲取 {len(final_df)} 筆資料。")
         st.dataframe(final_df, use_container_width=True, hide_index=True)
@@ -270,6 +270,7 @@ if st.session_state.ui_option == "未來 24H":
         st.download_button("📥 下載完整報表", csv, f"Report_{start_dt.strftime('%m%d')}.csv", use_container_width=True)
     else:
         st.warning("⚠️ 該區間查無符合條件的船舶資料。")
+
 
 
 
