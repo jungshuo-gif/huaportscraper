@@ -203,10 +203,6 @@ with st.expander("手動輸入", expanded=st.session_state.expander_state):
 start_dt = datetime.combine(sd_in, st_in)
 end_dt = datetime.combine(ed_in, et_in)
 
-# 修改點：按鈕維持在此處 (預設未展開的區域下方)
-if st.button("🚀 開始查詢", type="primary", use_container_width=True):
-    st.session_state.trigger_search = True
-
 # --- 6. 執行邏輯 (緩存優先) ---
 if st.button("🚀 開始查詢", type="primary", use_container_width=True):
     st.session_state.trigger_search = True
@@ -248,4 +244,5 @@ if st.session_state.trigger_search:
         st.download_button("📥 下載完整報表", csv, f"Report_{start_dt.strftime('%m%d')}.csv", use_container_width=True)
     else:
         st.warning("⚠️ 該區間查無符合條件的船舶資料。")
+
 
