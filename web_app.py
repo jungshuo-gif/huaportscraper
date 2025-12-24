@@ -214,34 +214,40 @@ end_dt = datetime.combine(ed_in, et_in)
 # --- 5.5 自動定時更新函數 ---
 @st.fragment(run_every="1200s") # 每 20 分鐘自動執行一次此區塊
 def auto_refresh_data():
-    now = get_taiwan_time()
     # 僅針對「未來 24H」進行自動更新
     if st.session_state.ui_option == "未來 24H":
-        # 檢查是否需要抓取（若無資料或已過期）
+        now_tw = get_taiwan_time()
+        # 檢查是否需要抓取（若無資料或已過期 20 分鐘）
         if (st.session_state.cache_24h_time is None or 
-            datetime.now() - st.session_state.cache_24h_time > timedelta(minutes=20)):
+            get_taiwan_time() - st.session_state.cache_24h_time > timedelta(minutes=20)):
             
-            # 執行爬蟲邏輯 (這裡會更新全域緩存)
-            # 註：此處需調用原本的爬蟲函數，並將結果存入 session_state
-            pass 
+            # 定義自動更新的區間 (未來 24H)
+            f24 = now_tw + timedelta(hours=24)
+            # 執行爬蟲並直接存入緩存
+            df_auto = run_scraper_segment(now_tw, f24, "(自動同步)")
+            
+            if not df_auto.empty:
+                cols = ["日期", "時間", "狀態", "碼頭", "中文船名", "長度(m)", "英文船名", "總噸位", "前一港", "下一港", "代理行"]
+                st.session_state.cache_24h_df = df_auto[cols].drop_duplicates().sort_values(by=["日期", "時間"])
+                st.session_state.cache_24h_time = get_taiwan_time()
+                st.rerun() # 強制重新整理 UI 顯示新資料
 
 # --- 6. 執行邏輯 (緩存優先) ---
 # 調用定時器
 auto_refresh_data()
 
-# --- 6. 執行邏輯 (緩存優先) ---
+# 顯示查詢按鈕
 if st.button("🚀 開始查詢", type="primary", use_container_width=True):
     st.session_state.trigger_search = True
-    
-# 判斷是否直接顯示緩存 (適用於連線時快速顯示)
-if st.session_state.ui_option == "未來 24H":
+
+# 判斷是否直接顯示緩存 (快速顯示邏輯)
+if st.session_state.ui_option == "未來 24H" and not st.session_state.trigger_search:
     if st.session_state.cache_24h_df is not None:
         st.success(f"⚡ 顯示近20分鐘內資料 (更新時間: {st.session_state.cache_24h_time.strftime('%H:%M')})")
         st.dataframe(st.session_state.cache_24h_df, use_container_width=True, hide_index=True)
-        # 如果是自動重新整理觸發的，到這裡就結束
-        if not st.session_state.trigger_search:
-            st.stop()
+        st.stop() # 停止執行後續爬蟲
 
+# 處理手動或選項切換觸發的查詢
 if st.session_state.trigger_search:
     st.session_state.trigger_search = False
     date_segments = split_date_range(start_dt, end_dt)
@@ -259,22 +265,14 @@ if st.session_state.trigger_search:
         cols = ["日期", "時間", "狀態", "碼頭", "中文船名", "長度(m)", "英文船名", "總噸位", "前一港", "下一港", "代理行"]
         final_df = final_df[cols]
         
-        # 更新緩存 (僅針對 24H 查詢)
-    if st.session_state.ui_option == "未來 24H":
-        st.session_state.cache_24h_df = final_df
-        st.session_state.cache_24h_time = get_taiwan_time() # 改用台灣時間函數，就會顯示 10:29
-    
+        # 同步更新緩存 (如果是 24H 查詢)
+        if st.session_state.ui_option == "未來 24H":
+            st.session_state.cache_24h_df = final_df
+            st.session_state.cache_24h_time = get_taiwan_time()
+        
         st.success(f"🎊 查詢完成！共獲取 {len(final_df)} 筆資料。")
         st.dataframe(final_df, use_container_width=True, hide_index=True)
         csv = final_df.to_csv(index=False).encode('utf-8-sig')
         st.download_button("📥 下載完整報表", csv, f"Report_{start_dt.strftime('%m%d')}.csv", use_container_width=True)
     else:
         st.warning("⚠️ 該區間查無符合條件的船舶資料。")
-
-
-
-
-
-
-
-
