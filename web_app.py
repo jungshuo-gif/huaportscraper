@@ -181,7 +181,7 @@ def run_scraper_segment(start_time, end_time, step_text=""):
 # 修改後：改用 markdown 語法並強制設定字體大小 (例如 24px)，確保手機不換行
 st.markdown(
     """
-    <h3 style='text-align: left; font-size: 22px; margin-bottom: 20px;'>
+    <h3 style='text-align: left; font-size: 30px; margin-bottom: 20px;'>
     🚢 花蓮港船舶即時查詢
     </h3>
     """, 
@@ -252,6 +252,7 @@ if st.session_state.trigger_search:
         st.download_button("📥 下載完整報表", csv, f"Report_{start_dt.strftime('%m%d')}.csv", use_container_width=True)
     else:
         st.warning("⚠️ 該區間查無符合條件的船舶資料。")
+
 
 
 
