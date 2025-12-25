@@ -18,11 +18,9 @@ from datetime import datetime, timedelta, time as dt_time
 st.set_page_config(page_title="花蓮港船舶即時查詢", layout="wide")
 
 def get_taiwan_time():
-    """取得當前台灣時間 (抹除秒數)"""
     return (datetime.utcnow() + timedelta(hours=8)).replace(second=0, microsecond=0)
 
 def split_date_range(start, end):
-    """將長區間拆分為多個 7 天內的區段"""
     segments = []
     curr_start = start
     while curr_start < end:
@@ -32,35 +30,43 @@ def split_date_range(start, end):
     return segments
 
 # --- 2. 初始化 Session State ---
+# 修正：預設設為 False，讓新連入的使用者優先讀取全域快取
 if 'trigger_search' not in st.session_state:
-    st.session_state.trigger_search = True 
+    st.session_state.trigger_search = False 
 if 'expander_state' not in st.session_state:
     st.session_state.expander_state = False 
+if 'last_option' not in st.session_state:
+    st.session_state.last_option = "未來 24H"
 
 # --- 3. UI 連動回調 ---
 def on_ui_change():
     now = get_taiwan_time()
     opt = st.session_state.ui_option
+    st.session_state.last_option = opt
     
     sd, st_val = now.date(), now.time()
     ed, et_val = now.date(), now.time()
 
     if opt == "未來 24H":
         f = now + timedelta(hours=24); ed, et_val = f.date(), f.time()
+        st.session_state.expander_state = False
     elif opt == "未來 3 日":
         f = now + timedelta(hours=72); ed, et_val = f.date(), f.time()
+        st.session_state.expander_state = False
     elif opt == "前 7 日":
         p = now - timedelta(days=7); sd, st_val = p.date(), dt_time(0, 0)
+        st.session_state.expander_state = False
     elif opt == "本月整月":
         first_day = now.replace(day=1, hour=0, minute=0)
         sd, st_val = first_day.date(), first_day.time()
+        st.session_state.expander_state = False
 
     st.session_state.sd_key = sd
     st.session_state.st_key = st_val
     st.session_state.ed_key = ed
     st.session_state.et_key = et_val
     
-    # 切換選項時觸發查詢 (未來 24H 會先檢查快取)
+    # 切換選項時觸發查詢
     st.session_state.trigger_search = True
 
 # --- 4. 核心爬蟲函數 ---
@@ -79,11 +85,9 @@ def run_scraper_segment(start_time, end_time, step_text=""):
             options.add_argument("--no-sandbox")
             options.add_argument("--disable-dev-shm-usage")
             options.add_experimental_option("prefs", {"download.default_directory": download_dir})
-            
             service = Service(ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install())
             driver = webdriver.Chrome(service=service, options=options)
             driver.execute_cdp_cmd('Page.setDownloadBehavior', {'behavior': 'allow', 'downloadPath': download_dir})
-            
             driver.get("https://tpnet.twport.com.tw/IFAWeb/Function?_RedirUrl=/IFAWeb/Reports/HistoryPortShipList")
             wait = WebDriverWait(driver, 20)
             if driver.find_elements(By.TAG_NAME, "iframe"): driver.switch_to.frame(0)
@@ -92,7 +96,7 @@ def run_scraper_segment(start_time, end_time, step_text=""):
             driver.execute_script("arguments[0].click();", h_tab)
 
             v_s, v_e = start_time.strftime("%Y/%m/%d %H:%M"), end_time.strftime("%Y/%m/%d %H:%M")
-            status.write(f"📝 填寫區間: {v_s} ~ {v_e}")
+            status.write(f"📝 填寫時間: {v_s} ~ {v_e}")
             inps = driver.find_elements(By.TAG_NAME, "input")
             d_inps = [i for i in inps if i.get_attribute("value") and i.get_attribute("value").startswith("20")]
             if len(d_inps) >= 2:
@@ -155,13 +159,13 @@ def run_scraper_segment(start_time, end_time, step_text=""):
             status.update(label="✅ 查詢完成", state="complete", expanded=False)
             return pd.DataFrame(parsed)
         except Exception as e:
-            st.error(f"❌ 查詢失敗: {e}")
+            st.error(f"❌ 錯誤: {e}")
             return pd.DataFrame()
         finally:
-            if driver: driver.quit() # 確保釋放記憶體
+            if driver: driver.quit() # 確保回收資源
 
 # --- 4.5 跨 Session 全域共享快取 ---
-@st.cache_data(ttl=1200) # 所有人共用 20 分鐘
+@st.cache_data(ttl=1200)
 def get_shared_24h_data():
     now_tw = get_taiwan_time()
     f24 = now_tw + timedelta(hours=24)
@@ -202,21 +206,22 @@ end_dt = datetime.combine(ed_in, et_in)
 
 # --- 6. 執行邏輯 ---
 
-# A. 優先檢查未來 24H 全域共享快取
+# A. 優先檢查快取模式：手機與新使用者連入時會走這條路
 if st.session_state.ui_option == "未來 24H" and not st.session_state.trigger_search:
     shared_df, update_time = get_shared_24h_data()
     if shared_df is not None:
         st.success(f"⚡ 顯示全域同步資料 (更新時間: {update_time.strftime('%H:%M')})")
         st.dataframe(shared_df, use_container_width=True, hide_index=True)
         csv_shared = shared_df.to_csv(index=False).encode('utf-8-sig')
-        st.download_button("📥 下載完整報表", csv_shared, f"Report_Shared.csv", use_container_width=True, key="dl_shared")
+        st.download_button("📥 下載完整報表", csv_shared, "Report_Shared.csv", use_container_width=True, key="dl_shared")
         st.stop()
 
 # B. 手動查詢按鈕
 if st.button("🚀 開始查詢", type="primary", use_container_width=True):
     st.session_state.trigger_search = True
-    st.cache_data.clear() # 手動查詢時強制刷清快取
+    st.cache_data.clear() # 強制清空全域快取
 
+# C. 執行查詢
 if st.session_state.trigger_search:
     st.session_state.trigger_search = False
     date_segments = split_date_range(start_dt, end_dt)
@@ -230,7 +235,7 @@ if st.session_state.trigger_search:
         final_df = pd.concat(all_dfs).drop_duplicates().sort_values(by=["日期", "時間"])
         cols = ["日期", "時間", "狀態", "碼頭", "中文船名", "長度(m)", "英文船名", "總噸位", "前一港", "下一港", "代理行"]
         final_df = final_df[cols]
-        st.success(f"🎊 查詢完成！共獲獲取 {len(final_df)} 筆資料。")
+        st.success(f"🎊 查詢完成！共獲取 {len(final_df)} 筆資料。")
         st.dataframe(final_df, use_container_width=True, hide_index=True)
         csv_manual = final_df.to_csv(index=False).encode('utf-8-sig')
         st.download_button("📥 下載完整報表", csv_manual, f"Report_{start_dt.strftime('%m%d')}.csv", use_container_width=True, key="dl_manual")
