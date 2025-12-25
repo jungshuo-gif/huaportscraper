@@ -207,7 +207,9 @@ end_dt = datetime.combine(ed_in, et_in)
 st.write("") 
 if st.button("🚀 開始查詢", type="primary", use_container_width=True):
     st.session_state.trigger_search = True
-    st.cache_data.clear()
+    # 如果是查詢「未來24H」，不清除快取，而是讓手動查詢的結果更新快取
+    if st.session_state.ui_option != "未來 24H":
+        st.cache_data.clear()
 
 # --- 6. 執行邏輯 ---
 
@@ -235,4 +237,55 @@ if st.session_state.ui_option == "未來 24H" and not st.session_state.trigger_s
         st.dataframe(shared_df, use_container_width=True, hide_index=True)
         csv_shared = shared_df.to_csv(index=False).encode('utf-8-sig')
         st.download_button("📥 下載完整報表", csv_shared, "Report_Shared.csv", use_container_width=True, key="dl_shared")
-        st.stop()
+        st.stop() 
+
+# 情況 C：執行手動爬蟲邏輯 (手動模式則保留進度條讓使用者確認完成)
+if st.session_state.trigger_search:
+    st.session_state.trigger_search = False
+    
+    # 🔥 特殊處理：如果是查詢「未來24H」，直接更新全域快取
+    if st.session_state.ui_option == "未來 24H":
+        now_tw = get_taiwan_time()
+        f24 = now_tw + timedelta(hours=24)
+        
+        # 清除舊快取
+        st.cache_data.clear()
+        
+        # 執行爬蟲並更新快取
+        df_result = run_scraper_segment(now_tw, f24, "(手動更新)")
+        
+        if not df_result.empty:
+            cols = ["日期", "時間", "狀態", "碼頭", "中文船名", "長度(m)", "英文船名", "總噸位", "前一港", "下一港", "代理行"]
+            final_df = df_result[cols].drop_duplicates().sort_values(by=["日期", "時間"])
+            
+            # 🎯 關鍵：呼叫快取函數來更新全域快取
+            get_shared_24h_data()
+            
+            st.success(f"🎊 查詢完成！已更新全域快取，共 {len(final_df)} 筆資料。")
+            st.dataframe(final_df, use_container_width=True, hide_index=True)
+            csv_manual = final_df.to_csv(index=False).encode('utf-8-sig')
+            st.download_button("📥 下載完整報表", csv_manual, "Report_Shared.csv", use_container_width=True, key="dl_manual_24h")
+        else:
+            st.warning("⚠️ 該區間查無符合條件的船舶資料。")
+        
+        st.stop()  # 完成後停止，避免執行後續邏輯
+    
+    # 一般情況：處理其他時段的查詢
+    date_segments = split_date_range(start_dt, end_dt)
+    all_dfs = []
+    
+    for i, (seg_s, seg_e) in enumerate(date_segments):
+        df_seg = run_scraper_segment(seg_s, seg_e, f"({i+1}/{len(date_segments)})")
+        if not df_seg.empty:
+            all_dfs.append(df_seg)
+    
+    if all_dfs:
+        final_df = pd.concat(all_dfs).drop_duplicates().sort_values(by=["日期", "時間"])
+        cols = ["日期", "時間", "狀態", "碼頭", "中文船名", "長度(m)", "英文船名", "總噸位", "前一港", "下一港", "代理行"]
+        final_df = final_df[cols]
+        st.success(f"🎊 查詢完成！共獲取 {len(final_df)} 筆資料。")
+        st.dataframe(final_df, use_container_width=True, hide_index=True)
+        csv_manual = final_df.to_csv(index=False).encode('utf-8-sig')
+        st.download_button("📥 下載完整報表", csv_manual, f"Report_{start_dt.strftime('%m%d')}.csv", use_container_width=True, key="dl_manual")
+    else:
+        st.warning("⚠️ 該區間查無符合條件的船舶資料。")
