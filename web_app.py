@@ -245,25 +245,16 @@ if st.session_state.trigger_search:
     
     # 🔥 特殊處理：如果是查詢「未來24H」，直接更新全域快取
     if st.session_state.ui_option == "未來 24H":
-        now_tw = get_taiwan_time()
-        f24 = now_tw + timedelta(hours=24)
-        
         # 清除舊快取
         st.cache_data.clear()
         
-        # 執行爬蟲並更新快取
-        df_result = run_scraper_segment(now_tw, f24, "(手動更新)")
+        # 🎯 直接呼叫快取函數（只會執行一次爬蟲）
+        shared_df, update_time = get_shared_24h_data()
         
-        if not df_result.empty:
-            cols = ["日期", "時間", "狀態", "碼頭", "中文船名", "長度(m)", "英文船名", "總噸位", "前一港", "下一港", "代理行"]
-            final_df = df_result[cols].drop_duplicates().sort_values(by=["日期", "時間"])
-            
-            # 🎯 關鍵：呼叫快取函數來更新全域快取
-            get_shared_24h_data()
-            
-            st.success(f"🎊 查詢完成！已更新全域快取，共 {len(final_df)} 筆資料。")
-            st.dataframe(final_df, use_container_width=True, hide_index=True)
-            csv_manual = final_df.to_csv(index=False).encode('utf-8-sig')
+        if shared_df is not None:
+            st.success(f"🎊 查詢完成！已更新全域快取，共 {len(shared_df)} 筆資料。")
+            st.dataframe(shared_df, use_container_width=True, hide_index=True)
+            csv_manual = shared_df.to_csv(index=False).encode('utf-8-sig')
             st.download_button("📥 下載完整報表", csv_manual, "Report_Shared.csv", use_container_width=True, key="dl_manual_24h")
         else:
             st.warning("⚠️ 該區間查無符合條件的船舶資料。")
