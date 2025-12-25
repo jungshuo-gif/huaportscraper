@@ -34,14 +34,11 @@ if 'trigger_search' not in st.session_state:
     st.session_state.trigger_search = False 
 if 'expander_state' not in st.session_state:
     st.session_state.expander_state = False 
-if 'last_option' not in st.session_state:
-    st.session_state.last_option = "未來 24H"
 
 # --- 3. UI 連動回調 ---
 def on_ui_change():
     now = get_taiwan_time()
     opt = st.session_state.ui_option
-    st.session_state.last_option = opt
     
     sd, st_val = now.date(), now.time()
     ed, et_val = now.date(), now.time()
@@ -67,7 +64,7 @@ def on_ui_change():
     
     st.session_state.trigger_search = True
 
-# --- 4. 核心爬蟲函數 (重新加入 st.status，僅在真正執行爬蟲時顯示) ---
+# --- 4. 核心爬蟲函數 ---
 def run_scraper_segment(start_time, end_time, step_text=""):
     download_dir = os.path.join(os.getcwd(), "temp_downloads")
     if not os.path.exists(download_dir): os.makedirs(download_dir)
@@ -76,7 +73,6 @@ def run_scraper_segment(start_time, end_time, step_text=""):
         except: pass
 
     driver = None
-    # 修改點：重新加入 st.status，確保在快取過期/自動同步時讓使用者看到狀態
     with st.status(f"🚢 查詢中，請等候約10秒 {step_text}...", expanded=True) as status:
         try:
             options = webdriver.ChromeOptions()
@@ -95,7 +91,7 @@ def run_scraper_segment(start_time, end_time, step_text=""):
             driver.execute_script("arguments[0].click();", h_tab)
 
             v_s, v_e = start_time.strftime("%Y/%m/%d %H:%M"), end_time.strftime("%Y/%m/%d %H:%M")
-            status.write(f"📝 填寫區間: {v_s} ~ {v_e}")
+            status.write(f"📝 填寫時間: {v_s} ~ {v_e}")
             inps = driver.find_elements(By.TAG_NAME, "input")
             d_inps = [i for i in inps if i.get_attribute("value") and i.get_attribute("value").startswith("20")]
             if len(d_inps) >= 2:
@@ -168,7 +164,6 @@ def run_scraper_segment(start_time, end_time, step_text=""):
 def get_shared_24h_data():
     now_tw = get_taiwan_time()
     f24 = now_tw + timedelta(hours=24)
-    # 這裡執行時，若快取失效，會調用內含 st.status 的爬蟲
     df = run_scraper_segment(now_tw, f24, "(全域自動同步)")
     if not df.empty:
         cols = ["日期", "時間", "狀態", "碼頭", "中文船名", "長度(m)", "英文船名", "總噸位", "前一港", "下一港", "代理行"]
@@ -206,13 +201,17 @@ end_dt = datetime.combine(ed_in, et_in)
 
 # --- 6. 執行邏輯 ---
 
-# 情況 A：讀取全域快取模式
+# 修改點：先放置查詢按鈕，確保按鈕在任何情況下都會顯示
+if st.button("🚀 開始查詢", type="primary", use_container_width=True):
+    st.session_state.trigger_search = True
+    st.cache_data.clear() # 手動清除快取
+
+# 情況 A：讀取全域快取模式 (僅在非手動查詢時觸發)
 if st.session_state.ui_option == "未來 24H" and not st.session_state.trigger_search:
-    # 建立一個空容器，用來捕捉函式內部的 UI 狀態
     placeholder_a = st.empty()
     with placeholder_a.container():
         shared_df, update_time = get_shared_24h_data()
-    # 資料獲取後，立刻清除容器內容（讓「查詢中」狀態條完全消失）
+    # 這裡會清除函式內部的 st.status 顯示，實現安靜秒開
     placeholder_a.empty()
     
     if shared_df is not None:
@@ -220,28 +219,19 @@ if st.session_state.ui_option == "未來 24H" and not st.session_state.trigger_s
         st.dataframe(shared_df, use_container_width=True, hide_index=True)
         csv_shared = shared_df.to_csv(index=False).encode('utf-8-sig')
         st.download_button("📥 下載完整報表", csv_shared, "Report_Shared.csv", use_container_width=True, key="dl_shared")
-        st.stop()
+        st.stop() # 讀取快取成功後停止執行下方程式碼
 
-# 情況 B：使用者點擊手動查詢按鈕
-if st.button("🚀 開始查詢", type="primary", use_container_width=True):
-    st.session_state.trigger_search = True
-    st.cache_data.clear() # 強制清除快取
-
-# 情況 C：執行手動爬蟲邏輯
+# 情況 C：執行爬蟲邏輯 (手動查詢或非 24H 選項)
 if st.session_state.trigger_search:
     st.session_state.trigger_search = False
     date_segments = split_date_range(start_dt, end_dt)
     all_dfs = []
     
-    # 同樣使用空容器來封裝手動查詢過程
-    placeholder_c = st.empty()
-    with placeholder_c.container():
-        for i, (seg_s, seg_e) in enumerate(date_segments):
-            df_seg = run_scraper_segment(seg_s, seg_e, f"({i+1}/{len(date_segments)})")
-            if not df_seg.empty:
-                all_dfs.append(df_seg)
-    # 完成後清除狀態條
-    placeholder_c.empty()
+    # 手動查詢時，st.status 會正常顯示
+    for i, (seg_s, seg_e) in enumerate(date_segments):
+        df_seg = run_scraper_segment(seg_s, seg_e, f"({i+1}/{len(date_segments)})")
+        if not df_seg.empty:
+            all_dfs.append(df_seg)
     
     if all_dfs:
         final_df = pd.concat(all_dfs).drop_duplicates().sort_values(by=["日期", "時間"])
