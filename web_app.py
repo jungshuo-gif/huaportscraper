@@ -205,10 +205,16 @@ start_dt = datetime.combine(sd_in, st_in)
 end_dt = datetime.combine(ed_in, et_in)
 
 # --- 6. 執行邏輯 ---
-# 情況 A：讀取快取模式
+
+# 情況 A：讀取全域快取模式
 if st.session_state.ui_option == "未來 24H" and not st.session_state.trigger_search:
-    # 命中快取時 get_shared_24h_data 函式內部的 UI 元件不會被重播，實現安靜秒開
-    shared_df, update_time = get_shared_24h_data()
+    # 建立一個空容器，用來捕捉函式內部的 UI 狀態
+    placeholder_a = st.empty()
+    with placeholder_a.container():
+        shared_df, update_time = get_shared_24h_data()
+    # 資料獲取後，立刻清除容器內容（讓「查詢中」狀態條完全消失）
+    placeholder_a.empty()
+    
     if shared_df is not None:
         st.success(f"⚡ 顯示全域同步資料 (更新時間: {update_time.strftime('%H:%M')})")
         st.dataframe(shared_df, use_container_width=True, hide_index=True)
@@ -216,20 +222,26 @@ if st.session_state.ui_option == "未來 24H" and not st.session_state.trigger_s
         st.download_button("📥 下載完整報表", csv_shared, "Report_Shared.csv", use_container_width=True, key="dl_shared")
         st.stop()
 
-# 情況 B：手動查詢按鈕 (確保全頁面只有一個主按鈕)
+# 情況 B：使用者點擊手動查詢按鈕
 if st.button("🚀 開始查詢", type="primary", use_container_width=True):
     st.session_state.trigger_search = True
-    st.cache_data.clear()
+    st.cache_data.clear() # 強制清除快取
 
-# 情況 C：執行爬蟲
+# 情況 C：執行手動爬蟲邏輯
 if st.session_state.trigger_search:
     st.session_state.trigger_search = False
     date_segments = split_date_range(start_dt, end_dt)
     all_dfs = []
     
-    for i, (seg_s, seg_e) in enumerate(date_segments):
-        df_seg = run_scraper_segment(seg_s, seg_e, f"({i+1}/{len(date_segments)})")
-        if not df_seg.empty: all_dfs.append(df_seg)
+    # 同樣使用空容器來封裝手動查詢過程
+    placeholder_c = st.empty()
+    with placeholder_c.container():
+        for i, (seg_s, seg_e) in enumerate(date_segments):
+            df_seg = run_scraper_segment(seg_s, seg_e, f"({i+1}/{len(date_segments)})")
+            if not df_seg.empty:
+                all_dfs.append(df_seg)
+    # 完成後清除狀態條
+    placeholder_c.empty()
     
     if all_dfs:
         final_df = pd.concat(all_dfs).drop_duplicates().sort_values(by=["日期", "時間"])
