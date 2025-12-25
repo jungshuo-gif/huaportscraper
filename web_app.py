@@ -211,6 +211,15 @@ if st.button("🚀 開始查詢", type="primary", use_container_width=True):
 
 # --- 6. 執行邏輯 ---
 
+# 🔄 自動更新機制：每20分鐘強制重新整理頁面
+if 'last_auto_refresh' not in st.session_state:
+    st.session_state.last_auto_refresh = time.time()
+
+if time.time() - st.session_state.last_auto_refresh > 1200:  # 1200秒 = 20分鐘
+    st.session_state.last_auto_refresh = time.time()
+    st.cache_data.clear()  # 清除快取確保獲取最新資料
+    st.rerun()
+
 # 情況 A：讀取全域快取模式 (自動同步)
 if st.session_state.ui_option == "未來 24H" and not st.session_state.trigger_search:
     placeholder_status = st.empty()
@@ -226,26 +235,4 @@ if st.session_state.ui_option == "未來 24H" and not st.session_state.trigger_s
         st.dataframe(shared_df, use_container_width=True, hide_index=True)
         csv_shared = shared_df.to_csv(index=False).encode('utf-8-sig')
         st.download_button("📥 下載完整報表", csv_shared, "Report_Shared.csv", use_container_width=True, key="dl_shared")
-        st.stop() 
-
-# 情況 C：執行手動爬蟲邏輯 (手動模式則保留進度條讓使用者確認完成)
-if st.session_state.trigger_search:
-    st.session_state.trigger_search = False
-    date_segments = split_date_range(start_dt, end_dt)
-    all_dfs = []
-    
-    for i, (seg_s, seg_e) in enumerate(date_segments):
-        df_seg = run_scraper_segment(seg_s, seg_e, f"({i+1}/{len(date_segments)})")
-        if not df_seg.empty:
-            all_dfs.append(df_seg)
-    
-    if all_dfs:
-        final_df = pd.concat(all_dfs).drop_duplicates().sort_values(by=["日期", "時間"])
-        cols = ["日期", "時間", "狀態", "碼頭", "中文船名", "長度(m)", "英文船名", "總噸位", "前一港", "下一港", "代理行"]
-        final_df = final_df[cols]
-        st.success(f"🎊 查詢完成！共獲取 {len(final_df)} 筆資料。")
-        st.dataframe(final_df, use_container_width=True, hide_index=True)
-        csv_manual = final_df.to_csv(index=False).encode('utf-8-sig')
-        st.download_button("📥 下載完整報表", csv_manual, f"Report_{start_dt.strftime('%m%d')}.csv", use_container_width=True, key="dl_manual")
-    else:
-        st.warning("⚠️ 該區間查無符合條件的船舶資料。")
+        st.stop()
