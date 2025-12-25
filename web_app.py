@@ -33,7 +33,7 @@ def split_date_range(start, end):
 
 # --- 2. 初始化 Session State ---
 if 'trigger_search' not in st.session_state:
-    st.session_state.trigger_search = False 
+    st.session_state.trigger_search = False  # 修正：預設不觸發，優先讀取全域快取
 if 'expander_state' not in st.session_state:
     st.session_state.expander_state = False 
 
@@ -189,7 +189,7 @@ st.radio(
     horizontal=True
 )
 
-# 摺疊選單放在按鈕上方
+# 摺疊選單
 with st.expander("更改查詢時段", expanded=st.session_state.expander_state):
     c1, c2 = st.columns(2)
     with c1:
@@ -199,13 +199,13 @@ with st.expander("更改查詢時段", expanded=st.session_state.expander_state)
         ed_in = st.date_input("結束日期", key="ed_key", value=f24_init.date())
         et_in = st.time_input("結束時間", key="et_key", value=f24_init.time(), label_visibility="collapsed")
 
-# 修改點：按鈕移動到摺疊選單的下方
+start_dt = datetime.combine(sd_in, st_in)
+end_dt = datetime.combine(ed_in, et_in)
+
+# 修正：按鈕移到快取邏輯(st.stop)上方，確保隨時可見且可點擊
 if st.button("🚀 開始查詢", type="primary", use_container_width=True):
     st.session_state.trigger_search = True
     st.cache_data.clear() # 手動清除快取
-
-start_dt = datetime.combine(sd_in, st_in)
-end_dt = datetime.combine(ed_in, et_in)
 
 # --- 6. 執行邏輯 ---
 
