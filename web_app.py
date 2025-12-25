@@ -30,7 +30,6 @@ def split_date_range(start, end):
     return segments
 
 # --- 2. 初始化 Session State ---
-# 修正：預設設為 False，讓新連入的使用者優先讀取全域快取
 if 'trigger_search' not in st.session_state:
     st.session_state.trigger_search = False 
 if 'expander_state' not in st.session_state:
@@ -66,10 +65,9 @@ def on_ui_change():
     st.session_state.ed_key = ed
     st.session_state.et_key = et_val
     
-    # 切換選項時觸發查詢
     st.session_state.trigger_search = True
 
-# --- 4. 核心爬蟲函數 ---
+# --- 4. 核心爬蟲函數 (重新加入 st.status，僅在真正執行爬蟲時顯示) ---
 def run_scraper_segment(start_time, end_time, step_text=""):
     download_dir = os.path.join(os.getcwd(), "temp_downloads")
     if not os.path.exists(download_dir): os.makedirs(download_dir)
@@ -78,6 +76,7 @@ def run_scraper_segment(start_time, end_time, step_text=""):
         except: pass
 
     driver = None
+    # 修改點：重新加入 st.status，確保在快取過期/自動同步時讓使用者看到狀態
     with st.status(f"🚢 查詢中，請等候約10秒 {step_text}...", expanded=True) as status:
         try:
             options = webdriver.ChromeOptions()
@@ -96,7 +95,7 @@ def run_scraper_segment(start_time, end_time, step_text=""):
             driver.execute_script("arguments[0].click();", h_tab)
 
             v_s, v_e = start_time.strftime("%Y/%m/%d %H:%M"), end_time.strftime("%Y/%m/%d %H:%M")
-            status.write(f"📝 填寫時間: {v_s} ~ {v_e}")
+            status.write(f"📝 填寫區間: {v_s} ~ {v_e}")
             inps = driver.find_elements(By.TAG_NAME, "input")
             d_inps = [i for i in inps if i.get_attribute("value") and i.get_attribute("value").startswith("20")]
             if len(d_inps) >= 2:
@@ -162,13 +161,14 @@ def run_scraper_segment(start_time, end_time, step_text=""):
             st.error(f"❌ 錯誤: {e}")
             return pd.DataFrame()
         finally:
-            if driver: driver.quit() # 確保回收資源
+            if driver: driver.quit()
 
 # --- 4.5 跨 Session 全域共享快取 ---
 @st.cache_data(ttl=1200)
 def get_shared_24h_data():
     now_tw = get_taiwan_time()
     f24 = now_tw + timedelta(hours=24)
+    # 這裡執行時，若快取失效，會調用內含 st.status 的爬蟲
     df = run_scraper_segment(now_tw, f24, "(全域自動同步)")
     if not df.empty:
         cols = ["日期", "時間", "狀態", "碼頭", "中文船名", "長度(m)", "英文船名", "總噸位", "前一港", "下一港", "代理行"]
@@ -205,9 +205,9 @@ start_dt = datetime.combine(sd_in, st_in)
 end_dt = datetime.combine(ed_in, et_in)
 
 # --- 6. 執行邏輯 ---
-
-# A. 優先檢查快取模式：手機與新使用者連入時會走這條路
+# 情況 A：讀取快取模式
 if st.session_state.ui_option == "未來 24H" and not st.session_state.trigger_search:
+    # 命中快取時 get_shared_24h_data 函式內部的 UI 元件不會被重播，實現安靜秒開
     shared_df, update_time = get_shared_24h_data()
     if shared_df is not None:
         st.success(f"⚡ 顯示全域同步資料 (更新時間: {update_time.strftime('%H:%M')})")
@@ -216,12 +216,12 @@ if st.session_state.ui_option == "未來 24H" and not st.session_state.trigger_s
         st.download_button("📥 下載完整報表", csv_shared, "Report_Shared.csv", use_container_width=True, key="dl_shared")
         st.stop()
 
-# B. 手動查詢按鈕
+# 情況 B：手動查詢按鈕 (確保全頁面只有一個主按鈕)
 if st.button("🚀 開始查詢", type="primary", use_container_width=True):
     st.session_state.trigger_search = True
-    st.cache_data.clear() # 強制清空全域快取
+    st.cache_data.clear()
 
-# C. 執行查詢
+# 情況 C：執行爬蟲
 if st.session_state.trigger_search:
     st.session_state.trigger_search = False
     date_segments = split_date_range(start_dt, end_dt)
