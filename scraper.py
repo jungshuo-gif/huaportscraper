@@ -77,8 +77,16 @@ def run_scraper():
             for ship in root.findall('SHIP'):
                 gt = int(round(float(ship.find('GROSS_TOA').text))) if ship.find('GROSS_TOA') is not None else 0
                 if gt < 500: continue
+                
                 raw_w = ship.find('WHARF_CODE').text if ship.find('WHARF_CODE') is not None else ""
-                w_label = f"{int(re.search(r'(\d+)', raw_w).group(1)):02d}號" if raw_w and re.search(r'(\d+)', raw_w) else raw_w
+                
+                # 修改此處：避免 f-string 內包含反斜線 \d
+                match = re.search(r'(\d+)', raw_w) if raw_w else None
+                if match:
+                    w_label = "{:02d}號".format(int(match.group(1)))
+                else:
+                    w_label = raw_w
+
                 raw_t = ship.find('PILOT_EXP_TM').text if ship.find('PILOT_EXP_TM') is not None else ""
                 d_s, t_s = (f"{raw_t[4:6]}/{raw_t[6:8]}", f"{raw_t[8:10]}:{raw_t[10:12]}") if len(raw_t) >= 12 else ("未排定", "未排定")
 
