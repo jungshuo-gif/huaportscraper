@@ -12,14 +12,17 @@ import time
 import re
 import os
 import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta, time as dt_time
 
 # --- 1. 基礎設定 ---
 st.set_page_config(page_title="花蓮港船舶即時查詢", layout="wide")
 
+from datetime import datetime, timedelta, timezone # 確保第一行 import 有加入 timezone
+
 def get_taiwan_time():
-    """取得當前台灣時間 (抹除秒數)"""
-    return (datetime.utcnow() + timedelta(hours=8)).replace(second=0, microsecond=0)
+    """取得當前台灣時間 (強制使用 UTC+8 並抹除秒數)"""
+    tz_taiwan = timezone(timedelta(hours=8))
+    # 使用 astimezone 轉換，確保在 GitHub Actions 也能顯示正確的台灣 12:18
+    return datetime.now(timezone.utc).astimezone(tz_taiwan).replace(tzinfo=None, second=0, microsecond=0)
 
 def split_date_range(start, end):
     """將長區間拆分為多個 7 天內的區段"""
@@ -239,3 +242,4 @@ if st.session_state.trigger_search:
         st.download_button("📥 下載完整報表", csv_manual, f"Report_{start_dt.strftime('%m%d')}.csv", use_container_width=True, key="dl_manual")
     else:
         st.warning("⚠️ 該區間查無符合條件的船舶資料。")
+
