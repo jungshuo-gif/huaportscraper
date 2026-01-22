@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone, time as dt_time
 st.set_page_config(page_title="花蓮港船舶即時查詢", layout="wide")
 
 def get_taiwan_time():
-    """取得當前台灣時間 (UTC+8)"""
+    """取得當前台灣時間 (強制 UTC+8 並抹除秒數)"""
     tz_taiwan = timezone(timedelta(hours=8))
     return datetime.now(timezone.utc).astimezone(tz_taiwan).replace(tzinfo=None, second=0, microsecond=0)
 
@@ -162,23 +162,28 @@ def run_scraper_segment(start_time, end_time, step_text=""):
         finally:
             if driver: driver.quit()
 
-# --- 5. 緩存讀取邏輯 ---
+# --- 4.5 緩存與同步邏輯 ---
 @st.cache_data(ttl=1200, show_spinner=False)
-def get_cached_data():
+def get_shared_24h_data():
+    """優先嘗試讀取 GitHub Action 產出的 CSV 緩存檔"""
     cache_file = "port_data_cache.csv"
-    # 如果 GitHub Actions 產出的 csv 存在且夠新
     if os.path.exists(cache_file):
-        df = pd.read_csv(cache_file)
-        mtime = datetime.fromtimestamp(os.path.getmtime(cache_file))
-        return df, mtime
+        try:
+            df = pd.read_csv(cache_file)
+            mtime = datetime.fromtimestamp(os.path.getmtime(cache_file))
+            return df, mtime
+        except: pass
     
-    # 若無緩存，則執行一次即時爬蟲(未來24H)
+    # 若無檔案則執行即時爬蟲
     now_tw = get_taiwan_time()
     f24 = now_tw + timedelta(hours=24)
-    df = run_scraper_segment(now_tw, f24, "(啟動即時同步)")
-    return df, get_taiwan_time()
+    df = run_scraper_segment(now_tw, f24, "(啟動全域同步)")
+    if not df.empty:
+        cols = ["日期", "時間", "狀態", "碼頭", "中文船名", "長度(m)", "英文船名", "總噸位", "前一港", "下一港", "代理行"]
+        return df[cols].drop_duplicates().sort_values(by=["日期", "時間"]), get_taiwan_time()
+    return None, None
 
-# --- 6. UI 介面 ---
+# --- 5. UI 介面 ---
 st.markdown(
     """<h3 style='text-align: left; font-size: 24px; margin-bottom: 20px;'>🚢 花蓮港船舶動態查詢</h3>""", 
     unsafe_allow_html=True
@@ -188,13 +193,14 @@ now_init = get_taiwan_time()
 f24_init = now_init + timedelta(hours=24)
 
 st.radio(
-    "⏱️ **預設顯示未來24H動態。點選按鈕可即時重新查詢。**",
+    "⏱️ **預設顯示未來24H動態(自動同步)。點選按鈕可即時重新查詢。**",
     ["未來 24H", "未來 3 日", "前 7 日", "本月整月"],
     key="ui_option",
     on_change=on_ui_change,
     horizontal=True
 )
 
+# 摺疊選單
 with st.expander("更改查詢時段", expanded=st.session_state.expander_state):
     c1, c2 = st.columns(2)
     with c1:
@@ -204,41 +210,62 @@ with st.expander("更改查詢時段", expanded=st.session_state.expander_state)
         ed_in = st.date_input("結束日期", key="ed_key", value=f24_init.date())
         et_in = st.time_input("結束時間", key="et_key", value=f24_init.time(), label_visibility="collapsed")
 
+start_dt = datetime.combine(sd_in, st_in)
+end_dt = datetime.combine(ed_in, et_in)
+
+st.write("") 
 if st.button("🚀 開始查詢", type="primary", use_container_width=True):
     st.session_state.trigger_search = True
     if st.session_state.ui_option != "未來 24H":
         st.cache_data.clear()
 
-# --- 7. 執行邏輯 ---
+# --- 6. 執行邏輯 ---
 
-# 模式 A: 未來 24H 模式 (優先讀取 CSV 緩存)
+# 自動更新 (20分鐘)
+if 'last_auto_refresh' not in st.session_state:
+    st.session_state.last_auto_refresh = time.time()
+
+if time.time() - st.session_state.last_auto_refresh > 1200:
+    st.session_state.last_auto_refresh = time.time()
+    st.cache_data.clear()
+    st.rerun()
+
+# 情況 A：未來 24H 模式 (優先快取)
 if st.session_state.ui_option == "未來 24H" and not st.session_state.trigger_search:
-    df, update_time = get_cached_data()
-    if df is not None and not df.empty:
-        st.success(f"⚡ 顯示同步資料 (更新時間: {update_time.strftime('%m/%d %H:%M')})")
-        st.dataframe(df, use_container_width=True, hide_index=True)
-        st.download_button("📥 下載報表", df.to_csv(index=False).encode('utf-8-sig'), "Report.csv", use_container_width=True)
-        st.stop()
+    shared_df, update_time = get_shared_24h_data()
+    if shared_df is not None:
+        st.success(f"⚡ 顯示同步資料 (更新時間: {update_time.strftime('%H:%M')})")
+        st.dataframe(shared_df, use_container_width=True, hide_index=True)
+        st.download_button("📥 下載完整報表", shared_df.to_csv(index=False).encode('utf-8-sig'), "Report_Shared.csv", use_container_width=True, key="dl_shared")
+        st.stop() 
 
-# 模式 B: 手動查詢/其他時段
+# 情況 B：手動查詢
 if st.session_state.trigger_search:
     st.session_state.trigger_search = False
     
-    start_dt = datetime.combine(sd_in, st_in)
-    end_dt = datetime.combine(ed_in, et_in)
+    # 處理 24H 手動點擊
+    if st.session_state.ui_option == "未來 24H":
+        st.cache_data.clear()
+        shared_df, update_time = get_shared_24h_data()
+        if shared_df is not None:
+            st.success(f"🎊 查詢完成！共 {len(shared_df)} 筆資料。")
+            st.dataframe(shared_df, use_container_width=True, hide_index=True)
+            st.download_button("📥 下載報表", shared_df.to_csv(index=False).encode('utf-8-sig'), "Report.csv", use_container_width=True)
+        st.stop()
     
+    # 處理其他時段
     date_segments = split_date_range(start_dt, end_dt)
     all_dfs = []
-    
     for i, (seg_s, seg_e) in enumerate(date_segments):
         df_seg = run_scraper_segment(seg_s, seg_e, f"({i+1}/{len(date_segments)})")
-        if not df_seg.empty:
-            all_dfs.append(df_seg)
+        if not df_seg.empty: all_dfs.append(df_seg)
     
     if all_dfs:
         final_df = pd.concat(all_dfs).drop_duplicates().sort_values(by=["日期", "時間"])
-        st.success(f"🎊 查詢完成！共 {len(final_df)} 筆資料。")
+        cols = ["日期", "時間", "狀態", "碼頭", "中文船名", "長度(m)", "英文船名", "總噸位", "前一港", "下一港", "代理行"]
+        final_df = final_df[cols]
+        st.success(f"🎊 查詢完成！共獲取 {len(final_df)} 筆資料。")
         st.dataframe(final_df, use_container_width=True, hide_index=True)
-        st.download_button("📥 下載報表", final_df.to_csv(index=False).encode('utf-8-sig'), "Report_Custom.csv", use_container_width=True)
+        st.download_button("📥 下載報表", final_df.to_csv(index=False).encode('utf-8-sig'), f"Report_{start_dt.strftime('%m%d')}.csv", use_container_width=True)
     else:
-        st.warning("⚠️ 該區間查無資料。")
+        st.warning("⚠️ 該區間查無船舶資料。")
