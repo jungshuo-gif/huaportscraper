@@ -162,7 +162,6 @@ def run_scraper_segment(start_time, end_time, step_text=""):
             if driver: driver.quit()
 
 # --- 4.5 跨 Session 全域共享快取 ---
-# 修正點：加入 show_spinner=False 以隱藏非預期的 "Running..." 系統文字
 @st.cache_data(ttl=1200, show_spinner=False)
 def get_shared_24h_data():
     now_tw = get_taiwan_time()
@@ -190,7 +189,7 @@ st.radio(
     horizontal=True
 )
 
-# 摺疊選單
+# 摺疊選單（查詢按鈕已移入）
 with st.expander("更改查詢時段", expanded=st.session_state.expander_state):
     c1, c2 = st.columns(2)
     with c1:
@@ -200,57 +199,44 @@ with st.expander("更改查詢時段", expanded=st.session_state.expander_state)
         ed_in = st.date_input("結束日期", key="ed_key", value=f24_init.date())
         et_in = st.time_input("結束時間", key="et_key", value=f24_init.time(), label_visibility="collapsed")
 
+    st.write("")
+
+    if st.button("🚀 開始查詢", type="primary", use_container_width=True):
+        st.session_state.trigger_search = True
+        if st.session_state.ui_option != "未來 24H":
+            st.cache_data.clear()
+
 start_dt = datetime.combine(sd_in, st_in)
 end_dt = datetime.combine(ed_in, et_in)
 
-# 按鈕區域 (固定在時段選單下方)
-st.write("") 
-if st.button("🚀 開始查詢", type="primary", use_container_width=True):
-    st.session_state.trigger_search = True
-    # 如果是查詢「未來24H」，不清除快取，而是讓手動查詢的結果更新快取
-    if st.session_state.ui_option != "未來 24H":
-        st.cache_data.clear()
-
 # --- 6. 執行邏輯 ---
 
-# 🔄 自動更新機制：每20分鐘強制重新整理頁面
 if 'last_auto_refresh' not in st.session_state:
     st.session_state.last_auto_refresh = time.time()
 
-if time.time() - st.session_state.last_auto_refresh > 1200:  # 1200秒 = 20分鐘
+if time.time() - st.session_state.last_auto_refresh > 1200:
     st.session_state.last_auto_refresh = time.time()
-    st.cache_data.clear()  # 清除快取確保獲取最新資料
+    st.cache_data.clear()
     st.rerun()
 
-# 情況 A：讀取全域快取模式 (自動同步)
 if st.session_state.ui_option == "未來 24H" and not st.session_state.trigger_search:
     placeholder_status = st.empty()
-    
     with placeholder_status.container():
         shared_df, update_time = get_shared_24h_data()
-    
-    # 資料取得後，清空「查詢中」的提示，只保留結果
     placeholder_status.empty()
-    
     if shared_df is not None:
         st.success(f"⚡ 顯示全域同步資料 (更新時間: {update_time.strftime('%H:%M')})")
         st.dataframe(shared_df, use_container_width=True, hide_index=True)
         csv_shared = shared_df.to_csv(index=False).encode('utf-8-sig')
         st.download_button("📥 下載完整報表", csv_shared, "Report_Shared.csv", use_container_width=True, key="dl_shared")
-        st.stop() 
+        st.stop()
 
-# 情況 C：執行手動爬蟲邏輯 (手動模式則保留進度條讓使用者確認完成)
 if st.session_state.trigger_search:
     st.session_state.trigger_search = False
     
-    # 🔥 特殊處理：如果是查詢「未來24H」，直接更新全域快取
     if st.session_state.ui_option == "未來 24H":
-        # 清除舊快取
         st.cache_data.clear()
-        
-        # 🎯 直接呼叫快取函數（只會執行一次爬蟲）
         shared_df, update_time = get_shared_24h_data()
-        
         if shared_df is not None:
             st.success(f"🎊 查詢完成！已更新全域快取，共 {len(shared_df)} 筆資料。")
             st.dataframe(shared_df, use_container_width=True, hide_index=True)
@@ -258,13 +244,10 @@ if st.session_state.trigger_search:
             st.download_button("📥 下載完整報表", csv_manual, "Report_Shared.csv", use_container_width=True, key="dl_manual_24h")
         else:
             st.warning("⚠️ 該區間查無符合條件的船舶資料。")
-        
-        st.stop()  # 完成後停止，避免執行後續邏輯
+        st.stop()
     
-    # 一般情況：處理其他時段的查詢
     date_segments = split_date_range(start_dt, end_dt)
     all_dfs = []
-    
     for i, (seg_s, seg_e) in enumerate(date_segments):
         df_seg = run_scraper_segment(seg_s, seg_e, f"({i+1}/{len(date_segments)})")
         if not df_seg.empty:
