@@ -182,7 +182,7 @@ now_init = get_taiwan_time()
 f24_init = now_init + timedelta(hours=24)
 
 st.radio(
-    "⏱️ **預設顯示未來24H動態(每20分鐘自動更新)。點選按鈕可即時重新查詢。**",
+    "⏱️ **預設顯示未來24H動態(每20分鐘自動更新)。**",
     ["未來 24H", "未來 3 日", "前 7 日", "本月整月"],
     key="ui_option",
     on_change=on_ui_change,
