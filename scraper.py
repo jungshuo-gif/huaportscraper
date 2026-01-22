@@ -10,13 +10,14 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
-from datetime import datetime, timedelta, timezone # 確保第一行 import 有加入 timezone
+from datetime import datetime, timedelta, timezone
 
 def get_taiwan_time():
     """取得當前台灣時間 (強制使用 UTC+8 並抹除秒數)"""
     tz_taiwan = timezone(timedelta(hours=8))
-    # 使用 astimezone 轉換，確保在 GitHub Actions 也能顯示正確的台灣 12:18
+    # 這是解決 GitHub 伺服器 (UTC) 與台灣時差 8 小時的標準做法
     return datetime.now(timezone.utc).astimezone(tz_taiwan).replace(tzinfo=None, second=0, microsecond=0)
+
 
 def run_scraper():
     download_dir = os.path.join(os.getcwd(), "downloads")
