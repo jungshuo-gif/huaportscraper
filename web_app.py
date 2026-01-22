@@ -31,6 +31,28 @@ def split_date_range(start, end):
         curr_start = curr_end + timedelta(seconds=1)
     return segments
 
+def load_cached_data():
+    """讀取 GitHub Actions 自動更新的快取資料"""
+    try:
+        if os.path.exists('port_data_cache.csv'):
+            with open('port_data_cache.csv', 'r', encoding='utf-8-sig') as f:
+                first_line = f.readline().strip()
+                # 提取更新時間
+                if first_line.startswith('# 更新時間:'):
+                    update_time_str = first_line.replace('# 更新時間:', '').strip()
+                    update_time = datetime.strptime(update_time_str, '%Y-%m-%d %H:%M')
+                else:
+                    update_time = None
+                
+                # 讀取資料
+                f.seek(0)
+                df = pd.read_csv(f, comment='#')
+                return df, update_time
+        return None, None
+    except Exception as e:
+        st.error(f"讀取快取資料時發生錯誤: {e}")
+        return None, None
+
 # --- 2. 初始化 Session State ---
 if 'trigger_search' not in st.session_state:
     st.session_state.trigger_search = False 
@@ -98,7 +120,7 @@ def run_scraper_segment(start_time, end_time, step_text=""):
             d_inps = [i for i in inps if i.get_attribute("value") and i.get_attribute("value").startswith("20")]
             if len(d_inps) >= 2:
                 driver.execute_script(f"arguments[0].value = '{v_s}'; arguments[0].dispatchEvent(new Event('change'));", d_inps[0])
-                driver.execute_script(f"arguments[0].value = '{v_e}'; arguments[0].dispatchEvent(new Event('change'));", d_inps[1])
+                driver.execute_script(f"arguments[1].value = '{v_e}'; arguments[1].dispatchEvent(new Event('change'));", d_inps[1])
             
             checked_boxes = driver.find_elements(By.CSS_SELECTOR, "input[type='checkbox']:checked")
             for cb in checked_boxes: driver.execute_script("arguments[0].click();", cb)
@@ -161,18 +183,6 @@ def run_scraper_segment(start_time, end_time, step_text=""):
         finally:
             if driver: driver.quit()
 
-# --- 4.5 跨 Session 全域共享快取 ---
-# 修正點：加入 show_spinner=False 以隱藏非預期的 "Running..." 系統文字
-@st.cache_data(ttl=1200, show_spinner=False)
-def get_shared_24h_data():
-    now_tw = get_taiwan_time()
-    f24 = now_tw + timedelta(hours=24)
-    df = run_scraper_segment(now_tw, f24, "(全域自動同步)")
-    if not df.empty:
-        cols = ["日期", "時間", "狀態", "碼頭", "中文船名", "長度(m)", "英文船名", "總噸位", "前一港", "下一港", "代理行"]
-        return df[cols].drop_duplicates().sort_values(by=["日期", "時間"]), get_taiwan_time()
-    return None, None
-
 # --- 5. UI 介面 ---
 st.markdown(
     """<h3 style='text-align: left; font-size: 24px; margin-bottom: 20px;'>🚢 花蓮港船舶動態查詢</h3>""", 
@@ -203,65 +213,52 @@ with st.expander("更改查詢時段", expanded=st.session_state.expander_state)
 start_dt = datetime.combine(sd_in, st_in)
 end_dt = datetime.combine(ed_in, et_in)
 
-# 按鈕區域 (固定在時段選單下方)
+# 按鈕區域
 st.write("") 
-if st.button("🚀 開始查詢", type="primary", use_container_width=True):
-    st.session_state.trigger_search = True
-    # 如果是查詢「未來24H」，不清除快取，而是讓手動查詢的結果更新快取
-    if st.session_state.ui_option != "未來 24H":
-        st.cache_data.clear()
+col_btn1, col_btn2 = st.columns([3, 1])
+with col_btn1:
+    if st.button("🚀 開始查詢", type="primary", use_container_width=True):
+        st.session_state.trigger_search = True
+
+with col_btn2:
+    if st.button("🔄 重新整理", use_container_width=True):
+        st.rerun()
 
 # --- 6. 執行邏輯 ---
 
-# 🔄 自動更新機制：每20分鐘強制重新整理頁面
-if 'last_auto_refresh' not in st.session_state:
-    st.session_state.last_auto_refresh = time.time()
-
-if time.time() - st.session_state.last_auto_refresh > 1200:  # 1200秒 = 20分鐘
-    st.session_state.last_auto_refresh = time.time()
-    st.cache_data.clear()  # 清除快取確保獲取最新資料
-    st.rerun()
-
-# 情況 A：讀取全域快取模式 (自動同步)
+# 情況 A：讀取 GitHub Actions 快取資料 (未來24H 且未觸發手動查詢)
 if st.session_state.ui_option == "未來 24H" and not st.session_state.trigger_search:
-    placeholder_status = st.empty()
+    cached_df, update_time = load_cached_data()
     
-    with placeholder_status.container():
-        shared_df, update_time = get_shared_24h_data()
-    
-    # 資料取得後，清空「查詢中」的提示，只保留結果
-    placeholder_status.empty()
-    
-    if shared_df is not None:
-        st.success(f"⚡ 顯示全域同步資料 (更新時間: {update_time.strftime('%H:%M')})")
-        st.dataframe(shared_df, use_container_width=True, hide_index=True)
-        csv_shared = shared_df.to_csv(index=False).encode('utf-8-sig')
-        st.download_button("📥 下載完整報表", csv_shared, "Report_Shared.csv", use_container_width=True, key="dl_shared")
-        st.stop() 
+    if cached_df is not None and not cached_df.empty:
+        # 計算資料新鮮度
+        now_tw = get_taiwan_time()
+        if update_time:
+            time_diff = (now_tw - update_time).total_seconds() / 60
+            if time_diff < 25:
+                freshness = "🟢 資料新鮮"
+            elif time_diff < 45:
+                freshness = "🟡 稍舊"
+            else:
+                freshness = "🔴 建議重新查詢"
+            
+            update_str = update_time.strftime('%m/%d %H:%M')
+            st.info(f"⚡ GitHub Actions 自動更新 | 更新時間: {update_str} | {freshness}")
+        else:
+            st.info("⚡ 顯示快取資料")
+        
+        st.dataframe(cached_df, use_container_width=True, hide_index=True)
+        csv_cached = cached_df.to_csv(index=False).encode('utf-8-sig')
+        st.download_button("📥 下載完整報表", csv_cached, "Report_Cached.csv", use_container_width=True, key="dl_cached")
+        st.stop()
+    else:
+        st.warning("⚠️ 尚無快取資料，請點擊「開始查詢」進行首次查詢。")
+        st.stop()
 
-# 情況 C：執行手動爬蟲邏輯 (手動模式則保留進度條讓使用者確認完成)
+# 情況 B：執行手動爬蟲邏輯
 if st.session_state.trigger_search:
     st.session_state.trigger_search = False
     
-    # 🔥 特殊處理：如果是查詢「未來24H」，直接更新全域快取
-    if st.session_state.ui_option == "未來 24H":
-        # 清除舊快取
-        st.cache_data.clear()
-        
-        # 🎯 直接呼叫快取函數（只會執行一次爬蟲）
-        shared_df, update_time = get_shared_24h_data()
-        
-        if shared_df is not None:
-            st.success(f"🎊 查詢完成！已更新全域快取，共 {len(shared_df)} 筆資料。")
-            st.dataframe(shared_df, use_container_width=True, hide_index=True)
-            csv_manual = shared_df.to_csv(index=False).encode('utf-8-sig')
-            st.download_button("📥 下載完整報表", csv_manual, "Report_Shared.csv", use_container_width=True, key="dl_manual_24h")
-        else:
-            st.warning("⚠️ 該區間查無符合條件的船舶資料。")
-        
-        st.stop()  # 完成後停止，避免執行後續邏輯
-    
-    # 一般情況：處理其他時段的查詢
     date_segments = split_date_range(start_dt, end_dt)
     all_dfs = []
     
